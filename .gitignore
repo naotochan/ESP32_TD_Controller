@@ -1,0 +1,7 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.claude/
+tasks/
+micropython_esp32.bin

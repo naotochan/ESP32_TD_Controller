@@ -1,0 +1,397 @@
+/* === App Layout === */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  color: #e0e0e0;
+  background: #1a1a2e;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: #16213e;
+  border-bottom: 1px solid #0f3460;
+}
+
+.app-header h1 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.history-btn {
+  padding: 8px 12px;
+  background: #0f3460;
+  color: #a0a0b0;
+  border: 1px solid #0f3460;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.history-btn:hover:not(.disabled) {
+  background: #1a4080;
+  color: #e0e0e0;
+}
+
+.history-btn.disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.orientation-toggle {
+  padding: 8px 14px;
+  background: #0f3460;
+  color: #e0e0e0;
+  border: 1px solid #0f3460;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.orientation-toggle:hover {
+  background: #1a4080;
+}
+
+.orientation-toggle.active {
+  background: #e94560;
+  border-color: #e94560;
+  color: white;
+}
+
+.export-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.export-btn {
+  padding: 8px 16px;
+  background: #e94560;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.export-btn:hover {
+  background: #ff6b81;
+}
+
+.export-status {
+  font-size: 13px;
+  color: #4ade80;
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* === Widget Panel (Left) === */
+.widget-panel {
+  width: 200px;
+  min-width: 200px;
+  background: #16213e;
+  border-right: 1px solid #0f3460;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.widget-panel h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #a0a0b0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.panel-hint {
+  font-size: 12px;
+  color: #666;
+  margin: 0 0 12px;
+}
+
+.template-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  margin-bottom: 6px;
+  background: #1a1a2e;
+  border: 1px solid #0f3460;
+  border-radius: 6px;
+  cursor: grab;
+  user-select: none;
+}
+
+.template-item:hover {
+  border-color: #e94560;
+}
+
+.template-icon {
+  font-size: 20px;
+}
+
+.template-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.template-info strong {
+  font-size: 13px;
+}
+
+.template-info span {
+  font-size: 11px;
+  color: #888;
+}
+
+/* === Canvas (Center) === */
+.canvas-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f0f23;
+  overflow: auto;
+  padding: 40px;
+}
+
+.canvas {
+  position: relative;
+  background: #1a1a2e;
+  border: 2px solid #0f3460;
+  border-radius: 4px;
+  box-shadow: 0 0 40px rgba(233, 69, 96, 0.1);
+}
+
+.grid-dot {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  background: #2a2a4e;
+  border-radius: 50%;
+}
+
+.canvas-label {
+  position: absolute;
+  font-size: 10px;
+  color: #555;
+}
+
+.canvas-label-top {
+  transform: translateX(-50%);
+}
+
+.canvas-label-left {
+  transform: translateY(-50%) translateX(-100%);
+}
+
+/* === Canvas Widgets === */
+.canvas-widget {
+  position: absolute;
+  border: 2px solid transparent;
+  border-radius: 3px;
+  cursor: move;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+}
+
+.canvas-widget.selected {
+  border-color: #e94560;
+  box-shadow: 0 0 0 1px #e94560;
+}
+
+.widget-label {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Button widget */
+.canvas-widget-button {
+  background: #3a5080;
+  border-color: transparent;
+}
+
+.canvas-widget-button.selected {
+  border-color: #e94560;
+}
+
+/* Slider widget */
+.canvas-widget-slider {
+  background: #2a2a4e;
+  border-color: transparent;
+}
+
+.canvas-widget-slider.selected {
+  border-color: #e94560;
+}
+
+.slider-track {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  transform: translateX(-50%);
+  background: #4a4a6e;
+  border-radius: 2px;
+}
+
+/* RGB widget */
+.canvas-widget-rgb {
+  background: #2a2a4e;
+  border-color: transparent;
+}
+
+.canvas-widget-rgb.selected {
+  border-color: #e94560;
+}
+
+.rgb-tracks {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 8px;
+  bottom: 12px;
+  display: flex;
+  justify-content: space-around;
+}
+
+.track-r { background: rgba(255, 0, 0, 0.4); }
+.track-g { background: rgba(0, 255, 0, 0.4); }
+.track-b { background: rgba(0, 128, 255, 0.4); }
+
+/* Resize handle */
+.resize-handle {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 10px;
+  height: 10px;
+  background: #e94560;
+  border-radius: 2px;
+  cursor: nwse-resize;
+  z-index: 10;
+}
+
+/* === Properties Panel (Right) === */
+.properties-panel {
+  width: 220px;
+  min-width: 220px;
+  background: #16213e;
+  border-left: 1px solid #0f3460;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.properties-panel h3 {
+  margin: 0 0 16px;
+  font-size: 14px;
+  color: #e94560;
+}
+
+.no-selection {
+  font-size: 12px;
+  color: #555;
+  font-style: italic;
+}
+
+.prop-field {
+  margin-bottom: 10px;
+}
+
+.prop-field label {
+  display: block;
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 4px;
+}
+
+.prop-field input {
+  width: 100%;
+  padding: 6px 8px;
+  background: #1a1a2e;
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.prop-field input:focus {
+  outline: none;
+  border-color: #e94560;
+}
+
+.prop-section {
+  margin-bottom: 12px;
+}
+
+.prop-section label {
+  display: block;
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 6px;
+}
+
+.pos-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.rgb-defaults {
+  display: flex;
+  gap: 4px;
+}
+
+.rgb-defaults input {
+  width: 100%;
+  padding: 6px;
+  background: #1a1a2e;
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 13px;
+  text-align: center;
+}
+
+.delete-btn {
+  width: 100%;
+  padding: 8px;
+  margin-top: 16px;
+  background: transparent;
+  border: 1px solid #e94560;
+  color: #e94560;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.delete-btn:hover {
+  background: #e94560;
+  color: white;
+}
