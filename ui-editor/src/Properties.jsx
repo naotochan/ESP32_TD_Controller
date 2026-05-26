@@ -123,7 +123,7 @@ function AlignPanel({ selectedIds, widgets, onUpdateMany }) {
   )
 }
 
-export default function Properties({ widget, selectedIds, widgets, onUpdate, onUpdateMany, onDelete }) {
+export default function Properties({ widget, selectedIds, widgets, pageCount = 1, onUpdate, onUpdateMany, onDelete }) {
   if (selectedIds.length > 1) {
     return (
       <AlignPanel
@@ -167,7 +167,22 @@ export default function Properties({ widget, selectedIds, widgets, onUpdate, onU
     <div className="properties-panel">
       <h3>{widget.type}</h3>
       {field('Label', 'label')}
-      {field('OSC Address', 'osc_addr')}
+      {widget.type !== 'PageButton' && field('OSC Address', 'osc_addr')}
+      {widget.type === 'PageButton' && (
+        <div className="prop-field">
+          <label>移動先ページ (0〜{pageCount - 1})</label>
+          <input
+            type="number"
+            min={0}
+            max={pageCount - 1}
+            value={widget.target_page ?? 1}
+            onChange={(e) => {
+              const v = Math.max(0, Math.min(pageCount - 1, parseInt(e.target.value, 10) || 0))
+              onUpdate(widget.id, { target_page: v })
+            }}
+          />
+        </div>
+      )}
       <div className="prop-section">
         <label>位置 / サイズ</label>
         <div className="pos-grid">

@@ -408,6 +408,39 @@ class HSlider(Widget):
         return (float(self._value),)
 
 
+class PageButton(Widget):
+    """Tapping switches to the target page. No OSC message sent."""
+
+    def __init__(self, tft, x, y, w, h, target_page, label=''):
+        super().__init__(tft, x, y, w, h, osc_addr='')
+        self.target_page = target_page
+        self._label = label or f'>{target_page + 1}'
+
+    def draw(self):
+        bg = color565(20, 60, 40) if self._touching else color565(10, 30, 20)
+        c  = color565(80, 220, 120) if self._touching else color565(50, 160, 80)
+        t = self.tft
+        t.fill_rect(self.x, self.y, self.w, self.h, bg)
+        for i in range(2):
+            bx, by = self.x + i, self.y + i
+            bw, bh = self.w - i * 2, self.h - i * 2
+            t.fill_rect(bx, by, bw, 1, c)
+            t.fill_rect(bx, by + bh - 1, bw, 1, c)
+            t.fill_rect(bx, by, 1, bh, c)
+            t.fill_rect(bx + bw - 1, by, 1, bh, c)
+        lx = self.x + (self.w - len(self._label) * 8) // 2
+        ly = self.y + (self.h - 8) // 2
+        t.text(self._label, lx, ly, color565(100, 255, 150), bg)
+
+    def on_touch(self, tx, ty): self.draw()
+    def on_release(self):
+        self.draw()
+        return True
+
+    def osc_message(self):
+        return None
+
+
 class IPDisplay(Widget):
     """Displays the ESP32's WiFi IP address. Read-only."""
 

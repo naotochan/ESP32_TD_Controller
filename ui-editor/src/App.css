@@ -121,6 +121,72 @@
   color: #4ade80;
 }
 
+/* === Page Tabs === */
+.page-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 16px;
+  background: #12192e;
+  border-bottom: 1px solid #0f3460;
+  flex-shrink: 0;
+}
+
+.page-tab {
+  padding: 4px 12px;
+  background: #1a1a2e;
+  color: #a0a0b0;
+  border: 1px solid #2a3a5a;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.page-tab:hover {
+  background: #1e3060;
+  color: #e0e0e0;
+}
+
+.page-tab.active {
+  background: #0f3460;
+  border-color: #4a8aff;
+  color: #e0e0ff;
+}
+
+.page-tab-close {
+  font-size: 11px;
+  color: #666;
+  line-height: 1;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.page-tab-close:hover {
+  color: #e94560;
+  background: rgba(233, 69, 96, 0.15);
+}
+
+.page-tab-add {
+  padding: 4px 10px;
+  background: transparent;
+  color: #4a8aff;
+  border: 1px dashed #2a3a5a;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.page-tab-add:hover {
+  border-color: #4a8aff;
+  color: #6aa8ff;
+}
+
 .app-body {
   display: flex;
   flex: 1;
@@ -369,6 +435,23 @@
 .track-r { background: rgba(255, 0, 0, 0.4); }
 .track-g { background: rgba(0, 255, 0, 0.4); }
 .track-b { background: rgba(0, 128, 255, 0.4); }
+
+/* PageButton widget */
+.canvas-widget-pagebutton {
+  background: #1e3a2e;
+  border-color: transparent;
+}
+
+.canvas-widget-pagebutton.selected {
+  border-color: #e94560;
+}
+
+.pagebutton-label {
+  font-size: 11px !important;
+  font-weight: 600;
+  color: #4aff8a !important;
+  letter-spacing: 0.5px;
+}
 
 /* IP Display widget */
 .canvas-widget-ip {

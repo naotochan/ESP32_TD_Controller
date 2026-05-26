@@ -3,16 +3,17 @@ import { useState, useCallback, useRef } from 'react'
 const SCALE = 2
 
 const WIDGET_TEMPLATES = {
-  Button:    { w: 105, h: 80 },
-  Slider:    { w: 30,  h: 140 },
-  HSlider:   { w: 140, h: 30 },
-  HSVPicker: { w: 90,  h: 140 },
-  IPDisplay: { w: 120, h: 30 },
+  Button:     { w: 105, h: 80 },
+  Slider:     { w: 30,  h: 140 },
+  HSlider:    { w: 140, h: 30 },
+  HSVPicker:  { w: 90,  h: 140 },
+  IPDisplay:  { w: 120, h: 30 },
+  PageButton: { w: 60,  h: 30 },
 }
 
 export default function Canvas({
   widgets, selectedIds, onSelect, onSelectMany,
-  onUpdate, onUpdateMany, onAddWidget, onCommitDrag,
+  onUpdate, onUpdateMany, onAddWidget, onCommitDrag, onGetSnapshot,
   screenW, screenH, showGrid, snapToGrid = true,
 }) {
   const containerRef = useRef(null)
@@ -33,6 +34,8 @@ export default function Canvas({
   onUpdateManyRef.current = onUpdateMany
   const onCommitDragRef = useRef(onCommitDrag)
   onCommitDragRef.current = onCommitDrag
+  const onGetSnapshotRef = useRef(onGetSnapshot)
+  onGetSnapshotRef.current = onGetSnapshot
 
   // --- Drag-and-drop from WidgetPanel ---
   const handleDragOver = useCallback((e) => {
@@ -59,7 +62,7 @@ export default function Canvas({
     const pointerY = (e.clientY - rect.top) / SCALE
     const additive = e.metaKey || e.ctrlKey
 
-    dragSnapshotRef.current = widgetsRef.current
+    dragSnapshotRef.current = onGetSnapshotRef.current()
 
     if (mode === 'move') {
       // Group drag: if the dragged widget is part of the selection, move all selected
@@ -439,6 +442,23 @@ function WidgetView({ widget, isSelected, onPointerDown, scale }) {
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tr" />
         <span className="widget-label">{widget.label || 'IP: ---'}</span>
+        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="bl" />
+        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="br" />
+      </div>
+    )
+  }
+
+  if (widget.type === 'PageButton') {
+    const target = widget.target_page != null ? widget.target_page + 1 : '?'
+    return (
+      <div
+        className={`canvas-widget canvas-widget-pagebutton ${isSelected ? 'selected' : ''}`}
+        style={style}
+        onPointerDown={(e) => onPointerDown(e, widget.id, 'move')}
+      >
+        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tl" />
+        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tr" />
+        <span className="widget-label pagebutton-label">▶ {target}</span>
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="bl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="br" />
       </div>

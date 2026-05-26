@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import './App.css'
 import Canvas from './Canvas'
 import WidgetPanel from './WidgetPanel'
@@ -11,15 +11,18 @@ const PORTRAIT = { w: 240, h: 320 }
 const LANDSCAPE = { w: 320, h: 240 }
 
 const WIDGET_TEMPLATES = {
-  Button:    { type: 'Button',    w: 105, h: 80 },
-  Slider:    { type: 'Slider',    w: 30,  h: 140 },
-  HSlider:   { type: 'HSlider',   w: 140, h: 30 },
-  HSVPicker: { type: 'HSVPicker', w: 90,  h: 140 },
-  IPDisplay: { type: 'IPDisplay', w: 120, h: 30 },
+  Button:     { type: 'Button',     w: 105, h: 80 },
+  Slider:     { type: 'Slider',     w: 30,  h: 140 },
+  HSlider:    { type: 'HSlider',    w: 140, h: 30 },
+  HSVPicker:  { type: 'HSVPicker',  w: 90,  h: 140 },
+  IPDisplay:  { type: 'IPDisplay',  w: 120, h: 30 },
+  PageButton: { type: 'PageButton', w: 60,  h: 30 },
 }
 
 export default function App() {
-  const widgetsState = useUndoableState([])
+  // pagesState holds [[widget, ...], [widget, ...], ...] — one array per page
+  const pagesState = useUndoableState([[]])
+  const [currentPage, setCurrentPage] = useState(0)
   const [selectedIds, setSelectedIds] = useState([])
   const [clipboard, setClipboard] = useState([])
   const [landscape, setLandscape] = useState(false)
@@ -29,42 +32,91 @@ export default function App() {
   const screenW = landscape ? LANDSCAPE.w : PORTRAIT.w
   const screenH = landscape ? LANDSCAPE.h : PORTRAIT.h
 
+  // Stable refs so callbacks always read the latest values without deps
+  const currentPageRef = useRef(currentPage)
+  currentPageRef.current = currentPage
+  const pagesRef = useRef(pagesState.value)
+  pagesRef.current = pagesState.value
+
+  const widgets = pagesState.value[currentPage] || []
+
+  // --- Helpers: operate only on the current page ---
+  const updatePage = useCallback((updater) => {
+    pagesState.set(prev => {
+      const pi = currentPageRef.current
+      const next = [...prev]
+      next[pi] = updater(next[pi] || [])
+      return next
+    })
+  }, [pagesState.set])
+
+  const updatePageSilent = useCallback((updater) => {
+    pagesState.setSilent(prev => {
+      const pi = currentPageRef.current
+      const next = [...prev]
+      next[pi] = updater(next[pi] || [])
+      return next
+    })
+  }, [pagesState.setSilent])
+
+  // --- Page management ---
+  const addPage = useCallback(() => {
+    const newIdx = pagesRef.current.length
+    pagesState.set(prev => [...prev, []])
+    setCurrentPage(newIdx)
+    setSelectedIds([])
+  }, [pagesState.set])
+
+  const removePage = useCallback((idx) => {
+    const len = pagesRef.current.length
+    if (len <= 1) return
+    pagesState.set(prev => prev.filter((_, i) => i !== idx))
+    setCurrentPage(prev => {
+      if (idx < prev) return prev - 1        // 前ページ削除 → 番号を1つ戻す
+      return Math.min(prev, len - 2)         // 現在/後ページ削除 → 末尾を超えないようclamp
+    })
+    setSelectedIds([])
+  }, [pagesState.set])
+
+  const switchPage = useCallback((idx) => {
+    setCurrentPage(idx)
+    setSelectedIds([])
+  }, [])
+
+  // --- Widget management ---
   const onAddWidget = useCallback((templateType, x, y) => {
     const tmpl = WIDGET_TEMPLATES[templateType]
-    const count = widgetsState.value.filter(w => w.type === templateType).length + 1
+    const currentWidgets = pagesRef.current[currentPageRef.current] || []
+    const count = currentWidgets.filter(w => w.type === templateType).length + 1
     let nx = Math.max(0, Math.min(screenW - tmpl.w, x || 10))
     let ny = Math.max(0, Math.min(screenH - tmpl.h, y || 10))
 
-    const labels = { Button: 'BTN ', Slider: 'SLIDER ', HSlider: 'HSLIDER ', HSVPicker: 'HSV ', IPDisplay: 'IP:' }
+    const labels = {
+      Button: 'BTN ', Slider: 'SLIDER ', HSlider: 'HSLIDER ',
+      HSVPicker: 'HSV ', IPDisplay: 'IP:', PageButton: '>',
+    }
     const newWidget = {
       id: Date.now(),
       type: templateType,
-      x: nx,
-      y: ny,
-      w: tmpl.w,
-      h: tmpl.h,
+      x: nx, y: ny, w: tmpl.w, h: tmpl.h,
       label: (labels[templateType] || '') + count,
-      osc_addr: templateType === 'Button'
-        ? `/esp32/button/${count}`
-        : templateType === 'Slider'
-          ? `/esp32/slider/${count}`
-          : templateType === 'HSlider'
-            ? `/esp32/hslider/${count}`
-            : templateType === 'HSVPicker'
-              ? `/esp32/color/${count}`
-              : templateType === 'IPDisplay'
-                ? `/esp32/ip/1`
-                : `/esp32/widget/${count}`,
+      osc_addr: templateType === 'Button'      ? `/esp32/button/${count}`
+               : templateType === 'Slider'     ? `/esp32/slider/${count}`
+               : templateType === 'HSlider'    ? `/esp32/hslider/${count}`
+               : templateType === 'HSVPicker'  ? `/esp32/color/${count}`
+               : templateType === 'IPDisplay'  ? `/esp32/ip/1`
+               : '',
     }
     if (templateType === 'Slider' || templateType === 'HSlider') newWidget.default = 127
     if (templateType === 'HSVPicker') newWidget.default = [127, 127, 127]
+    if (templateType === 'PageButton') newWidget.target_page = 1
 
-    const overlap = widgetsState.value.find(w => w.x === nx && w.y === ny)
+    const overlap = currentWidgets.find(w => w.x === nx && w.y === ny)
     if (overlap) newWidget.x += tmpl.w + 5
 
-    widgetsState.set(prev => [...prev, newWidget])
+    updatePage(prev => [...prev, newWidget])
     setSelectedIds([newWidget.id])
-  }, [widgetsState.value, screenW, screenH, widgetsState.set])
+  }, [updatePage, screenW, screenH])
 
   const onSelect = useCallback((id, additive = false) => {
     if (id == null) {
@@ -78,35 +130,34 @@ export default function App() {
     }
   }, [])
 
-  const onSelectMany = useCallback((ids) => {
-    setSelectedIds(ids)
-  }, [])
+  const onSelectMany = useCallback((ids) => setSelectedIds(ids), [])
 
-  // History-recording versions — used by Properties panel
+  // History-recording versions (Properties panel)
   const onUpdate = useCallback((id, changes) => {
-    widgetsState.set(prev => prev.map(w => w.id === id ? { ...w, ...changes } : w))
-  }, [widgetsState.set])
+    updatePage(prev => prev.map(w => w.id === id ? { ...w, ...changes } : w))
+  }, [updatePage])
 
   const onUpdateMany = useCallback((updaterFn) => {
-    widgetsState.set(updaterFn)
-  }, [widgetsState.set])
+    updatePage(updaterFn)
+  }, [updatePage])
 
-  // Silent versions — used by Canvas during drag (no per-frame history)
+  // Silent versions (Canvas drag — no per-frame history)
   const onUpdateSilent = useCallback((id, changes) => {
-    widgetsState.setSilent(prev => prev.map(w => w.id === id ? { ...w, ...changes } : w))
-  }, [widgetsState.setSilent])
+    updatePageSilent(prev => prev.map(w => w.id === id ? { ...w, ...changes } : w))
+  }, [updatePageSilent])
 
   const onUpdateManySilent = useCallback((updaterFn) => {
-    widgetsState.setSilent(updaterFn)
-  }, [widgetsState.setSilent])
+    updatePageSilent(updaterFn)
+  }, [updatePageSilent])
 
-  // Commit one undo step at drag end (snapshot = state at drag start)
+  // Canvas calls this to snapshot ALL pages at drag start, then commits on drag end
+  const onGetSnapshot = useCallback(() => pagesRef.current, [])
   const onCommitDrag = useCallback((snapshot) => {
-    widgetsState.pushToHistory(snapshot)
-  }, [widgetsState.pushToHistory])
+    pagesState.pushToHistory(snapshot)
+  }, [pagesState.pushToHistory])
 
   const onReorder = useCallback((id, direction) => {
-    widgetsState.set(prev => {
+    updatePage(prev => {
       const idx = prev.findIndex(w => w.id === id)
       if (idx === -1) return prev
       const swapIdx = direction === 'up' ? idx + 1 : idx - 1
@@ -115,54 +166,53 @@ export default function App() {
       ;[next[idx], next[swapIdx]] = [next[swapIdx], next[idx]]
       return next
     })
-  }, [widgetsState.set])
+  }, [updatePage])
 
   const onDelete = useCallback((id) => {
-    widgetsState.set(prev => prev.filter(w => w.id !== id))
+    updatePage(prev => prev.filter(w => w.id !== id))
     setSelectedIds(prev => prev.filter(sid => sid !== id))
-  }, [widgetsState.set])
+  }, [updatePage])
 
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
 
-      // Escape: deselect all
-      if (e.key === 'Escape') {
-        setSelectedIds([])
-        return
-      }
+      if (e.key === 'Escape') { setSelectedIds([]); return }
 
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length > 0) {
-        widgetsState.set(prev => prev.filter(w => !selectedIds.includes(w.id)))
+        updatePage(prev => prev.filter(w => !selectedIds.includes(w.id)))
         setSelectedIds([])
         return
       }
 
       const mod = e.ctrlKey || e.metaKey
+      const currentWidgets = pagesRef.current[currentPageRef.current] || []
 
       if (mod && e.key === 'a') {
         e.preventDefault()
-        setSelectedIds(widgetsState.value.map(w => w.id))
+        setSelectedIds(currentWidgets.map(w => w.id))
         return
       }
 
       if (mod && e.key === 'c' && selectedIds.length > 0) {
         e.preventDefault()
-        const copied = widgetsState.value
-          .filter(w => selectedIds.includes(w.id))
-          .map(({ id, ...rest }) => rest) // eslint-disable-line no-unused-vars
-        setClipboard(copied)
+        setClipboard(
+          currentWidgets
+            .filter(w => selectedIds.includes(w.id))
+            .map(({ id, ...rest }) => rest) // eslint-disable-line no-unused-vars
+        )
         return
       }
 
       if (mod && e.key === 'x' && selectedIds.length > 0) {
         e.preventDefault()
-        const copied = widgetsState.value
-          .filter(w => selectedIds.includes(w.id))
-          .map(({ id, ...rest }) => rest) // eslint-disable-line no-unused-vars
-        setClipboard(copied)
-        widgetsState.set(prev => prev.filter(w => !selectedIds.includes(w.id)))
+        setClipboard(
+          currentWidgets
+            .filter(w => selectedIds.includes(w.id))
+            .map(({ id, ...rest }) => rest) // eslint-disable-line no-unused-vars
+        )
+        updatePage(prev => prev.filter(w => !selectedIds.includes(w.id)))
         setSelectedIds([])
         return
       }
@@ -176,17 +226,19 @@ export default function App() {
           x: Math.min(screenW - w.w, w.x + 10),
           y: Math.min(screenH - w.h, w.y + 10),
         }))
-        widgetsState.set(prev => [...prev, ...pasted])
+        updatePage(prev => [...prev, ...pasted])
         setSelectedIds(pasted.map(w => w.id))
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selectedIds, clipboard, widgetsState.value, widgetsState.set, screenW, screenH])
+  }, [selectedIds, clipboard, updatePage, screenW, screenH])
 
   const selectedWidget = selectedIds.length === 1
-    ? widgetsState.value.find(w => w.id === selectedIds[0]) || null
+    ? widgets.find(w => w.id === selectedIds[0]) || null
     : null
+
+  const pageCount = pagesState.value.length
 
   return (
     <div className="app">
@@ -194,44 +246,54 @@ export default function App() {
         <h1>ESP32 UI Layout Editor</h1>
         <div className="header-actions">
           <button
-            className={`history-btn ${widgetsState.canUndo ? '' : 'disabled'}`}
-            onClick={widgetsState.undo}
+            className={`history-btn ${pagesState.canUndo ? '' : 'disabled'}`}
+            onClick={pagesState.undo}
             title="Undo (Cmd+Z)"
-          >
-            ← Undo
-          </button>
+          >← Undo</button>
           <button
-            className={`history-btn ${widgetsState.canRedo ? '' : 'disabled'}`}
-            onClick={widgetsState.redo}
+            className={`history-btn ${pagesState.canRedo ? '' : 'disabled'}`}
+            onClick={pagesState.redo}
             title="Redo (Cmd+Shift+Z)"
-          >
-            Redo →
-          </button>
+          >Redo →</button>
           <button
             className={`orientation-toggle ${landscape ? 'active' : ''}`}
             onClick={() => setLandscape(prev => !prev)}
-          >
-            {landscape ? 'Landscape' : 'Portrait'}
-          </button>
+          >{landscape ? 'Landscape' : 'Portrait'}</button>
           <button
             className={`grid-toggle ${showGrid ? 'active' : ''}`}
             onClick={() => setShowGrid(prev => !prev)}
-          >
-            Grid
-          </button>
+          >Grid</button>
           <button
             className={`snap-toggle ${snapToGrid ? 'active' : ''}`}
             onClick={() => setSnapToGrid(prev => !prev)}
-          >
-            Snap
-          </button>
-          <ExportButton widgets={widgetsState.value} orientation={landscape ? 'landscape' : 'portrait'} />
+          >Snap</button>
+          <ExportButton pages={pagesState.value} orientation={landscape ? 'landscape' : 'portrait'} />
         </div>
       </header>
+
+      <div className="page-tabs">
+        {pagesState.value.map((_, idx) => (
+          <button
+            key={idx}
+            className={`page-tab ${idx === currentPage ? 'active' : ''}`}
+            onClick={() => switchPage(idx)}
+          >
+            Page {idx + 1}
+            {pageCount > 1 && (
+              <span
+                className="page-tab-close"
+                onClick={e => { e.stopPropagation(); removePage(idx) }}
+              >×</span>
+            )}
+          </button>
+        ))}
+        <button className="page-tab-add" onClick={addPage}>+ Page</button>
+      </div>
+
       <div className="app-body">
         <WidgetPanel onDrop={onAddWidget} />
         <Canvas
-          widgets={widgetsState.value}
+          widgets={widgets}
           selectedIds={selectedIds}
           onSelect={onSelect}
           onSelectMany={onSelectMany}
@@ -239,6 +301,7 @@ export default function App() {
           onUpdate={onUpdateSilent}
           onUpdateMany={onUpdateManySilent}
           onCommitDrag={onCommitDrag}
+          onGetSnapshot={onGetSnapshot}
           screenW={screenW}
           screenH={screenH}
           showGrid={showGrid}
@@ -248,13 +311,14 @@ export default function App() {
           <Properties
             widget={selectedWidget}
             selectedIds={selectedIds}
-            widgets={widgetsState.value}
+            widgets={widgets}
+            pageCount={pageCount}
             onUpdate={onUpdate}
             onUpdateMany={onUpdateMany}
             onDelete={onDelete}
           />
           <LayersPanel
-            widgets={widgetsState.value}
+            widgets={widgets}
             selectedIds={selectedIds}
             onSelect={onSelect}
             onReorder={onReorder}

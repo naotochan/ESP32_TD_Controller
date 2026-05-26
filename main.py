@@ -11,12 +11,15 @@ from lib.dotenv import load
 from lib.ili9341 import ILI9341, color565
 from lib.xpt2046 import XPT2046
 from lib.osc import OSCSender
-from ui import Button, Slider, HSlider, HSVPicker, IPDisplay
+from ui import Button, Slider, HSlider, HSVPicker, IPDisplay, PageButton
 
 try:
-    from widgets import WIDGETS, ORIENTATION, ROTATION
+    import widgets as _w
+    ORIENTATION = getattr(_w, 'ORIENTATION', 'portrait')
+    ROTATION    = getattr(_w, 'ROTATION',    0)
+    PAGES       = getattr(_w, 'PAGES', None) or [getattr(_w, 'WIDGETS', [])]
 except ImportError:
-    from widgets import WIDGETS
+    PAGES = [[]]
     ORIENTATION = "portrait"
     ROTATION = 0
 
@@ -37,27 +40,38 @@ touch     = XPT2046(spi_touch, cs=Pin(33), irq=Pin(36),
                    screen_w=SCREEN_W, screen_h=SCREEN_H, rotation=ROTATION)
 osc       = OSCSender(host, port)
 
-# --- Instantiate widgets from data config ---
-WIDGET_MAP = {"Button": Button, "Slider": Slider, "HSlider": HSlider, "HSVPicker": HSVPicker, "IPDisplay": IPDisplay}
+# --- Instantiate widgets for all pages ---
+WIDGET_MAP = {
+    "Button": Button, "Slider": Slider, "HSlider": HSlider,
+    "HSVPicker": HSVPicker, "IPDisplay": IPDisplay, "PageButton": PageButton,
+}
 
-widget_instances = []
-for w in WIDGETS:
-    cls = WIDGET_MAP.get(w["type"])
-    if cls is None:
-        continue
-    kwargs = {k: v for k, v in w.items() if k != "type"}
-    widget_instances.append(cls(tft, **kwargs))
+all_pages = []
+for page_widgets in PAGES:
+    instances = []
+    for w in page_widgets:
+        cls = WIDGET_MAP.get(w["type"])
+        if cls is None:
+            continue
+        kwargs = {k: v for k, v in w.items() if k != "type"}
+        instances.append(cls(tft, **kwargs))
+    all_pages.append(instances)
+
+if not all_pages:
+    all_pages = [[]]
+
+current_page = 0
 
 
-# --- Draw initial UI ---
-tft.fill(color565(10, 10, 20))
-for w in widget_instances:
-    w.draw()
+def draw_page(page_idx):
+    tft.fill(color565(10, 10, 20))
+    for w in all_pages[page_idx]:
+        w.draw()
 
+
+draw_page(current_page)
 
 # --- Main loop ---
-# OSC throttle: continuous-value widgets (Slider, HSVPicker) are rate-limited
-# to avoid flooding the network. Buttons always send immediately.
 _OSC_INTERVAL_MS = 20
 _last_osc = {}
 
@@ -66,19 +80,25 @@ try:
         pos = touch.get_pos()
         now = time.ticks_ms()
 
-        for w in widget_instances:
+        for w in all_pages[current_page]:
             claimed = w.process(pos)
             if claimed:
-                msg = w.osc_message()
-                if msg is not None:
-                    if getattr(w, 'throttle', False):
-                        wid = id(w)
-                        if time.ticks_diff(now, _last_osc.get(wid, 0)) >= _OSC_INTERVAL_MS:
+                if isinstance(w, PageButton) and not w._touching:
+                    new_page = w.target_page
+                    if 0 <= new_page < len(all_pages) and new_page != current_page:
+                        current_page = new_page
+                        draw_page(current_page)
+                else:
+                    msg = w.osc_message()
+                    if msg is not None:
+                        if getattr(w, 'throttle', False):
+                            wid = id(w)
+                            if time.ticks_diff(now, _last_osc.get(wid, 0)) >= _OSC_INTERVAL_MS:
+                                osc.send(w.osc_addr, *msg)
+                                _last_osc[wid] = now
+                        else:
                             osc.send(w.osc_addr, *msg)
-                            _last_osc[wid] = now
-                    else:
-                        osc.send(w.osc_addr, *msg)
-                break  # claimed widget exclusively owns this touch frame
+                break
 
         time.sleep_ms(10)
 except KeyboardInterrupt:
