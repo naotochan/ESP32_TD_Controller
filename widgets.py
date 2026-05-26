@@ -3,5 +3,10 @@ ORIENTATION = "portrait"
 ROTATION = 0
 
 WIDGETS = [
-    {"type": "Button", "x": 75, "y": 125, "w": 105, "h": 80, "label": "BTN 1", "osc_addr": "/esp32/button/1"},
+    {"type": "HSlider", "x": 10, "y": 190, "w": 215, "h": 85, "osc_addr": "/esp32/hslider/1", "default": 127},
+    {"type": "IPDisplay", "x": 10, "y": 285, "w": 215, "h": 30, "osc_addr": "/esp32/ip/1"},
+    {"type": "Button", "x": 10, "y": 10, "w": 105, "h": 80, "label": "BTN 1", "osc_addr": "/esp32/button/1"},
+    {"type": "Button", "x": 120, "y": 10, "w": 105, "h": 80, "label": "BTN 2", "osc_addr": "/esp32/button/2"},
+    {"type": "Button", "x": 10, "y": 100, "w": 105, "h": 80, "label": "BTN 3", "osc_addr": "/esp32/button/3"},
+    {"type": "Button", "x": 120, "y": 100, "w": 105, "h": 80, "label": "BTN 4", "osc_addr": "/esp32/button/4"},
 ]

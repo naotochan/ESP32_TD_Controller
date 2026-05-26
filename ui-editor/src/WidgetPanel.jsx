@@ -1,8 +1,10 @@
 export default function WidgetPanel({ onDrop }) {
   const templates = [
     { type: 'Button',    icon: '⬜', desc: 'トグルボタン' },
-    { type: 'Slider',    icon: '🎚️', desc: '0-255 スライダー' },
-    { type: 'RGBPicker', icon: '🎨', desc: 'R/G/B ピッカー' },
+    { type: 'Slider',    icon: '🎚️', desc: '0-255 縦スライダー' },
+    { type: 'HSlider',   icon: '↔️', desc: '0-255 横スライダー' },
+    { type: 'HSVPicker', icon: '🎨', desc: 'H/S/V ピッカー' },
+    { type: 'IPDisplay', icon: '🌐', desc: 'IP アドレス表示' },
   ]
 
   const onDragStart = (e, type) => {

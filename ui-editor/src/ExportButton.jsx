@@ -14,10 +14,10 @@ export default function ExportButton({ widgets, orientation = 'portrait' }) {
         args += `, "label": "${w.label}"`
       }
       args += `, "osc_addr": "${w.osc_addr}"`
-      if (w.type === 'Slider' && w.default != null) {
+      if ((w.type === 'Slider' || w.type === 'HSlider') && w.default != null) {
         args += `, "default": ${Number(w.default)}`
       }
-      if (w.type === 'RGBPicker' && Array.isArray(w.default)) {
+      if (w.type === 'HSVPicker' && Array.isArray(w.default)) {
         args += `, "default": (${w.default.join(', ')})`
       }
       lines.push(`    {${args}},`)
