@@ -1,7 +1,27 @@
+# Secrets & runtime config
 .env
+secrets.yaml
+td-controller.yaml
+
+# Python
 .venv/
 __pycache__/
 *.pyc
+
+# OS / editor
+.DS_Store
+*.log
+
+# Build artifacts & caches
+.esphome/
+node_modules/
+
+# Local working dirs (tooling / claude-mem / lazyweb)
 .claude/
+.lazyweb/
 tasks/
-micropython_esp32.bin
+
+# Misc local junk
+tmp/
+archive/
+.git.backup-*/
