@@ -411,10 +411,18 @@ class HSlider(Widget):
 class PageButton(Widget):
     """Tapping switches to the target page. No OSC message sent."""
 
-    def __init__(self, tft, x, y, w, h, target_page, label=''):
+    def __init__(self, tft, x, y, w, h, nav_mode='goto', target_page=0, label=''):
         super().__init__(tft, x, y, w, h, osc_addr='')
+        self.nav_mode = nav_mode
         self.target_page = target_page
-        self._label = label or f'>{target_page + 1}'
+        if label:
+            self._label = label
+        elif nav_mode == 'prev':
+            self._label = '<<'
+        elif nav_mode == 'next':
+            self._label = '>>'
+        else:
+            self._label = f'>{target_page + 1}'
 
     def draw(self):
         bg = color565(20, 60, 40) if self._touching else color565(10, 30, 20)

@@ -13,15 +13,27 @@ from lib.xpt2046 import XPT2046
 from lib.osc import OSCSender
 from ui import Button, Slider, HSlider, HSVPicker, IPDisplay, PageButton
 
-try:
-    import widgets as _w
-    ORIENTATION = getattr(_w, 'ORIENTATION', 'portrait')
-    ROTATION    = getattr(_w, 'ROTATION',    0)
-    PAGES       = getattr(_w, 'PAGES', None) or [getattr(_w, 'WIDGETS', [])]
-except ImportError:
-    PAGES = [[]]
-    ORIENTATION = "portrait"
-    ROTATION = 0
+def _load_layout():
+    # 1) layout.json (deployed via deploy-layout.sh)
+    try:
+        import ujson
+        with open('layout.json') as f:
+            d = ujson.load(f)
+        return d.get('orientation', 'portrait'), d.get('rotation', 0), d.get('pages', [[]])
+    except Exception:
+        pass
+
+    # 2) widgets.py fallback
+    try:
+        import widgets as _w
+        orientation = getattr(_w, 'ORIENTATION', 'portrait')
+        rotation    = getattr(_w, 'ROTATION',    0)
+        pages       = getattr(_w, 'PAGES', None) or [getattr(_w, 'WIDGETS', [])]
+        return orientation, rotation, pages
+    except ImportError:
+        return 'portrait', 0, [[]]
+
+ORIENTATION, ROTATION, PAGES = _load_layout()
 
 # --- Screen ---
 SCREEN_W, SCREEN_H = (320, 240) if ORIENTATION == "landscape" else (240, 320)
@@ -36,7 +48,7 @@ spi_tft   = SPI(1, baudrate=40_000_000, sck=Pin(14), mosi=Pin(13), miso=Pin(12))
 tft       = ILI9341(spi_tft, cs=Pin(15), dc=Pin(2), bl=Pin(21), rotation=ROTATION)
 spi_touch = SPI(2, baudrate=1_000_000, sck=Pin(25), mosi=Pin(32), miso=Pin(39))
 touch     = XPT2046(spi_touch, cs=Pin(33), irq=Pin(36),
-                   x_min=599, x_max=3443, y_min=445, y_max=3564,
+                   x_min=350, x_max=3799, y_min=199, y_max=3721,
                    screen_w=SCREEN_W, screen_h=SCREEN_H, rotation=ROTATION)
 osc       = OSCSender(host, port)
 
@@ -53,7 +65,7 @@ for page_widgets in PAGES:
         cls = WIDGET_MAP.get(w["type"])
         if cls is None:
             continue
-        kwargs = {k: v for k, v in w.items() if k != "type"}
+        kwargs = {k: v for k, v in w.items() if k not in ("type", "id")}
         instances.append(cls(tft, **kwargs))
     all_pages.append(instances)
 
@@ -84,8 +96,14 @@ try:
             claimed = w.process(pos)
             if claimed:
                 if isinstance(w, PageButton) and not w._touching:
-                    new_page = w.target_page
-                    if 0 <= new_page < len(all_pages) and new_page != current_page:
+                    mode = getattr(w, 'nav_mode', 'goto')
+                    if mode == 'prev':
+                        new_page = (current_page - 1) % len(all_pages)
+                    elif mode == 'next':
+                        new_page = (current_page + 1) % len(all_pages)
+                    else:
+                        new_page = w.target_page
+                    if new_page != current_page:
                         current_page = new_page
                         draw_page(current_page)
                 else:
