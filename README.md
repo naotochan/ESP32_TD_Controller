@@ -72,6 +72,42 @@ OSC In CHOP を配置し **Port を 7000** に設定 → Active をオン。ESP3
 
 ---
 
+## 二回目以降の手順
+
+初回セットアップ（venv / MicroPython 焼き / `.env` 作成）が済んでいれば、普段の作業は `./deploy.sh` だけで完結します。
+
+### コードや `widgets.py` を変更してデプロイ
+
+```bash
+./deploy.sh
+# 自動検出が間違える / 複数機器が刺さっている場合はポート明示
+./deploy.sh /dev/cu.usbserial-XXX
+```
+
+### レイアウトを Web エディタで作り直すとき
+
+```bash
+cd ui-editor
+npm run dev                # 初回のみ事前に `npm install` が必要
+# → http://localhost:5173 でドラッグ&ドロップ
+# → 「Export」で widgets.py をダウンロード → プロジェクトルートに置き換え
+cd .. && ./deploy.sh
+```
+
+### WiFi や送信先 (TouchDesigner PC の IP) を変えたい
+
+`.env` を編集して `./deploy.sh`。`.env` も毎回 ESP32 に転送されます。
+
+### ESP32 の挙動を確認したい (REPL)
+
+```bash
+./.venv/bin/mpremote connect /dev/cu.usbserial-XXX repl
+# 物理 RST ボタンを押すと boot.py / main.py の出力が流れる
+# Ctrl+X で抜ける
+```
+
+---
+
 ## OSC メッセージ仕様
 
 | ウィジェット | アドレス例 | 型 | 値 |
