@@ -1,0 +1,49 @@
+{
+  "orientation": "portrait",
+  "rotation": 0,
+  "pages": [
+    [
+      {
+        "id": 1779860555508,
+        "type": "Button",
+        "x": 10,
+        "y": 10,
+        "w": 105,
+        "h": 80,
+        "label": "BTN 1",
+        "osc_addr": "/esp32/button/1"
+      },
+      {
+        "id": 1779860556608,
+        "type": "Button",
+        "x": 120,
+        "y": 10,
+        "w": 105,
+        "h": 80,
+        "label": "BTN 2",
+        "osc_addr": "/esp32/button/2"
+      },
+      {
+        "id": 1779861108991,
+        "type": "Button",
+        "x": 65,
+        "y": 115,
+        "w": 105,
+        "h": 80,
+        "label": "BTN 3",
+        "osc_addr": "/esp32/button/3"
+      },
+      {
+        "id": 1779861284425,
+        "type": "HSlider",
+        "x": 50,
+        "y": 225,
+        "w": 140,
+        "h": 30,
+        "label": "HSLIDER 1",
+        "osc_addr": "/esp32/hslider/1",
+        "default": 127
+      }
+    ]
+  ]
+}

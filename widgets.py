@@ -2,6 +2,18 @@
 ORIENTATION = "portrait"
 ROTATION = 0
 
-WIDGETS = [
-    {"type": "Button", "x": 75, "y": 125, "w": 105, "h": 80, "label": "BTN 1", "osc_addr": "/esp32/button/1"},
+PAGES = [
+    [  # Page 1
+        {"type": "Button", "x": 10, "y": 10, "w": 105, "h": 80, "label": "BTN 1", "osc_addr": "/esp32/button/1"},
+        {"type": "Button", "x": 120, "y": 10, "w": 105, "h": 80, "label": "BTN 2", "osc_addr": "/esp32/button/2"},
+        {"type": "Button", "x": 10, "y": 100, "w": 215, "h": 170, "label": "BTN 3", "osc_addr": "/esp32/button/3"},
+        {"type": "PageButton", "x": 10, "y": 280, "w": 60, "h": 30, "label": "PAGE 1", "nav_mode": "next"},
+    ],
+    [  # Page 2
+        {"type": "Slider", "x": 10, "y": 10, "w": 30, "h": 140, "osc_addr": "/esp32/slider/1", "default": 127},
+        {"type": "Slider", "x": 45, "y": 10, "w": 30, "h": 140, "osc_addr": "/esp32/slider/2", "default": 127},
+        {"type": "Slider", "x": 150, "y": 10, "w": 30, "h": 140, "osc_addr": "/esp32/slider/3", "default": 127},
+        {"type": "Slider", "x": 190, "y": 10, "w": 30, "h": 140, "osc_addr": "/esp32/slider/4", "default": 127},
+        {"type": "PageButton", "x": 10, "y": 285, "w": 60, "h": 30, "label": "PAGE 1", "nav_mode": "prev"},
+    ],
 ]

@@ -4,11 +4,40 @@
   box-sizing: border-box;
 }
 
+:root {
+  /* === Color Tokens === */
+  --bg-primary: #0a0a1a;
+  --bg-panel: #16213e;
+  --bg-surface: #1a1a2e;
+  --bg-hover: rgba(99, 102, 241, 0.1);
+
+  --text-primary: #e0e0e0;
+  --text-secondary: #8888aa;
+  --text-tertiary: #666688;
+
+  --accent-primary: #6366f1;
+  --accent-secondary: #818cf8;
+  --accent-success: #4ade80;
+  --accent-danger: #ef4444;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-dashed: rgba(255, 255, 255, 0.12);
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  --shadow-elevated: 0 0 40px rgba(99, 102, 241, 0.06);
+
+  --transition-fast: 0.15s ease;
+}
+
 body {
   margin: 0;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  background: #1a1a2e;
-  color: #e0e0e0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
   overflow: hidden;
 }
 

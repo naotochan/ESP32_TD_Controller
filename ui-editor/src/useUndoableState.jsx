@@ -50,8 +50,18 @@ export default function useUndoableState(initialValue) {
     return () => window.removeEventListener('keydown', handler)
   }, [undo, redo])
 
+  const setSilent = useCallback((next) => {
+    setValue(prev => typeof next === 'function' ? next(prev) : next)
+  }, [])
+
+  const pushToHistory = useCallback((snap) => {
+    pastRef.current.push(snap)
+    if (pastRef.current.length > MAX_HISTORY) pastRef.current.shift()
+    futureRef.current = []
+  }, [])
+
   const canUndo = pastRef.current.length > 0
   const canRedo = futureRef.current.length > 0
 
-  return { value, set: setAndRecord, undo, redo, canUndo, canRedo }
+  return { value, set: setAndRecord, setSilent, pushToHistory, undo, redo, canUndo, canRedo }
 }
