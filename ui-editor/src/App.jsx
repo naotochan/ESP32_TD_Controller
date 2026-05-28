@@ -70,10 +70,15 @@ export default function App() {
   const removePage = useCallback((idx) => {
     const len = pagesRef.current.length
     if (len <= 1) return
+    const widgetCount = pagesRef.current[idx]?.length ?? 0
+    if (widgetCount > 0) {
+      const ok = window.confirm(`Page ${idx + 1} には ${widgetCount} 個のウィジェットがあります。\n削除してよいですか？`)
+      if (!ok) return
+    }
     pagesState.set(prev => prev.filter((_, i) => i !== idx))
     setCurrentPage(prev => {
-      if (idx < prev) return prev - 1        // 前ページ削除 → 番号を1つ戻す
-      return Math.min(prev, len - 2)         // 現在/後ページ削除 → 末尾を超えないようclamp
+      if (idx < prev) return prev - 1
+      return Math.min(prev, len - 2)
     })
     setSelectedIds([])
   }, [pagesState.set])
@@ -93,7 +98,7 @@ export default function App() {
 
     const labels = {
       Button: 'BTN ', Slider: 'SLIDER ', HSlider: 'HSLIDER ',
-      HSVPicker: 'HSV ', IPDisplay: 'IP:', PageButton: '>',
+      HSVPicker: 'HSV ', IPDisplay: 'IP:', PageButton: 'PAGE ',
     }
     const newWidget = {
       id: Date.now(),
@@ -109,7 +114,7 @@ export default function App() {
     }
     if (templateType === 'Slider' || templateType === 'HSlider') newWidget.default = 127
     if (templateType === 'HSVPicker') newWidget.default = [127, 127, 127]
-    if (templateType === 'PageButton') newWidget.target_page = 1
+    if (templateType === 'PageButton') { newWidget.target_page = 1; newWidget.nav_mode = 'goto' }
 
     const overlap = currentWidgets.find(w => w.x === nx && w.y === ny)
     if (overlap) newWidget.x += tmpl.w + 5
@@ -245,29 +250,16 @@ export default function App() {
       <header className="app-header">
         <h1>ESP32 UI Layout Editor</h1>
         <div className="header-actions">
-          <button
-            className={`history-btn ${pagesState.canUndo ? '' : 'disabled'}`}
-            onClick={pagesState.undo}
-            title="Undo (Cmd+Z)"
-          >← Undo</button>
-          <button
-            className={`history-btn ${pagesState.canRedo ? '' : 'disabled'}`}
-            onClick={pagesState.redo}
-            title="Redo (Cmd+Shift+Z)"
-          >Redo →</button>
-          <button
-            className={`orientation-toggle ${landscape ? 'active' : ''}`}
-            onClick={() => setLandscape(prev => !prev)}
-          >{landscape ? 'Landscape' : 'Portrait'}</button>
-          <button
-            className={`grid-toggle ${showGrid ? 'active' : ''}`}
-            onClick={() => setShowGrid(prev => !prev)}
-          >Grid</button>
-          <button
-            className={`snap-toggle ${snapToGrid ? 'active' : ''}`}
-            onClick={() => setSnapToGrid(prev => !prev)}
-          >Snap</button>
-          <ExportButton pages={pagesState.value} orientation={landscape ? 'landscape' : 'portrait'} />
+          <ExportButton
+            pages={pagesState.value}
+            orientation={landscape ? 'landscape' : 'portrait'}
+            onLoad={(data) => {
+              pagesState.set(() => data.pages)
+              setLandscape(data.orientation === 'landscape')
+              setCurrentPage(0)
+              setSelectedIds([])
+            }}
+          />
         </div>
       </header>
 
@@ -292,21 +284,51 @@ export default function App() {
 
       <div className="app-body">
         <WidgetPanel onDrop={onAddWidget} />
-        <Canvas
-          widgets={widgets}
-          selectedIds={selectedIds}
-          onSelect={onSelect}
-          onSelectMany={onSelectMany}
-          onAddWidget={onAddWidget}
-          onUpdate={onUpdateSilent}
-          onUpdateMany={onUpdateManySilent}
-          onCommitDrag={onCommitDrag}
-          onGetSnapshot={onGetSnapshot}
-          screenW={screenW}
-          screenH={screenH}
-          showGrid={showGrid}
-          snapToGrid={snapToGrid}
-        />
+        <div className="canvas-area">
+          <div className="canvas-overlay-toolbar">
+            <button
+              className={`canvas-tool-btn ${pagesState.canUndo ? '' : 'disabled'}`}
+              onClick={pagesState.undo}
+              title="Undo (Cmd+Z)"
+            >↩ Undo</button>
+            <button
+              className={`canvas-tool-btn ${pagesState.canRedo ? '' : 'disabled'}`}
+              onClick={pagesState.redo}
+              title="Redo (Cmd+Shift+Z)"
+            >Redo ↪</button>
+            <div className="canvas-toolbar-sep" />
+            <button
+              className={`canvas-tool-btn ${landscape ? 'active' : ''}`}
+              onClick={() => setLandscape(prev => !prev)}
+              title="向きを切り替え"
+            >{landscape ? 'Land' : 'Port'}</button>
+            <button
+              className={`canvas-tool-btn ${showGrid ? 'active' : ''}`}
+              onClick={() => setShowGrid(prev => !prev)}
+              title="グリッド表示"
+            >Grid</button>
+            <button
+              className={`canvas-tool-btn ${snapToGrid ? 'active' : ''}`}
+              onClick={() => setSnapToGrid(prev => !prev)}
+              title="スナップ"
+            >Snap</button>
+          </div>
+          <Canvas
+            widgets={widgets}
+            selectedIds={selectedIds}
+            onSelect={onSelect}
+            onSelectMany={onSelectMany}
+            onAddWidget={onAddWidget}
+            onUpdate={onUpdateSilent}
+            onUpdateMany={onUpdateManySilent}
+            onCommitDrag={onCommitDrag}
+            onGetSnapshot={onGetSnapshot}
+            screenW={screenW}
+            screenH={screenH}
+            showGrid={showGrid}
+            snapToGrid={snapToGrid}
+          />
+        </div>
         <div className="right-sidebar">
           <Properties
             widget={selectedWidget}

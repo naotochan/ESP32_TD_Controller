@@ -170,6 +170,55 @@
   box-shadow: 0 2px 8px rgba(99,102,241,0.3);
 }
 
+.device-status {
+  font-size: 11px;
+  font-family: monospace;
+  padding: 3px 8px;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+}
+
+.device-status.connected {
+  color: var(--accent-success);
+  background: rgba(16,185,129,0.12);
+}
+
+.device-status.disconnected {
+  color: var(--text-muted);
+  background: var(--bg-element);
+}
+
+.device-status.offline {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.export-btn.deploy {
+  background: var(--accent-success);
+}
+
+.export-btn.deploy:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 2px 8px rgba(16,185,129,0.35);
+}
+
+.export-btn.secondary {
+  background: var(--bg-element);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+
+.export-btn.secondary:hover {
+  background: var(--bg-hover);
+  box-shadow: none;
+}
+
+.export-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border-subtle);
+}
+
 .export-status {
   font-size: 12px;
   color: var(--accent-success);
@@ -245,6 +294,65 @@
   display: flex;
   flex: 1;
   overflow: hidden;
+}
+
+/* === Canvas Area (wraps Canvas + overlay toolbar) === */
+.canvas-area {
+  flex: 1;
+  position: relative;
+  display: flex;
+  overflow: hidden;
+}
+
+.canvas-overlay-toolbar {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  box-shadow: var(--shadow-elevated);
+}
+
+.canvas-tool-btn {
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.canvas-tool-btn:hover:not(.disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.canvas-tool-btn.active {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.canvas-tool-btn.disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.canvas-toolbar-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border-subtle);
+  margin: 0 2px;
+  flex-shrink: 0;
 }
 
 /* === Widget Panel (Left) === */
@@ -808,27 +916,32 @@
 .align-buttons {
   display: flex;
   gap: 4px;
-  flex-wrap: wrap;
 }
 
 .align-btn {
   flex: 1;
-  min-width: 32px;
-  padding: 7px 4px;
+  min-width: 28px;
+  padding: 6px 4px;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 15px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: all var(--transition-fast);
 }
 
-.align-btn:hover {
+.align-btn:hover:not(:disabled) {
   background: var(--bg-hover);
   border-color: var(--accent-primary);
   color: var(--text-primary);
+}
+
+.align-btn:disabled {
+  opacity: 0.28;
+  cursor: default;
 }
 
 .align-hint {
@@ -838,34 +951,34 @@
   font-style: italic;
 }
 
-/* === Fixed-gap arrangement === */
-.gap-row {
+/* === PageButton Navigation Mode === */
+.nav-mode-group {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
+  gap: 4px;
 }
 
-.gap-label {
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.gap-input {
-  width: 52px;
-  padding: 4px 6px;
+.nav-mode-btn {
+  flex: 1;
+  padding: 5px 4px;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
   text-align: center;
+  transition: all var(--transition-fast);
 }
 
-.arrange-btn {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+.nav-mode-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.nav-mode-btn.active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: white;
 }
 
 /* === RGB Color Picker === */

@@ -449,7 +449,10 @@ function WidgetView({ widget, isSelected, onPointerDown, scale }) {
   }
 
   if (widget.type === 'PageButton') {
-    const target = widget.target_page != null ? widget.target_page + 1 : '?'
+    const navMode = widget.nav_mode || 'goto'
+    const defaultLabel = navMode === 'prev' ? '◀ PREV'
+                       : navMode === 'next' ? 'NEXT ▶'
+                       : `▶ P${(widget.target_page ?? 0) + 1}`
     return (
       <div
         className={`canvas-widget canvas-widget-pagebutton ${isSelected ? 'selected' : ''}`}
@@ -458,7 +461,7 @@ function WidgetView({ widget, isSelected, onPointerDown, scale }) {
       >
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tr" />
-        <span className="widget-label pagebutton-label">▶ {target}</span>
+        <span className="widget-label pagebutton-label">{widget.label || defaultLabel}</span>
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="bl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="br" />
       </div>
