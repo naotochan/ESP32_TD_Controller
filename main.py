@@ -1,10 +1,4 @@
 """ESP32 TD Controller - main entry point."""
-import os
-
-# --- Deploy guard (early): skip everything if .deploying flag exists ---
-if ".deploying" in os.listdir():
-    raise SystemExit("Deploy mode — skipping main.py")
-
 import time
 from machine import SPI, Pin
 from lib.dotenv import load

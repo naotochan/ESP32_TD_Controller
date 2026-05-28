@@ -2,6 +2,7 @@
 import glob
 import json
 import os
+import shutil
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -10,6 +11,7 @@ PORT = 3737
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MPREMOTE = os.path.join(SCRIPT_DIR, ".venv", "bin", "mpremote")
 LAYOUT_FILE = os.path.join(SCRIPT_DIR, "layout.json")
+LAYOUT_EXAMPLE = os.path.join(SCRIPT_DIR, "layout.json.example")
 MAIN_FILE = os.path.join(SCRIPT_DIR, "main.py")
 
 
@@ -69,13 +71,17 @@ class Handler(BaseHTTPRequestHandler):
             self._respond(503, "ESP32 not found. Connect via USB.")
             return
 
-        result = subprocess.run(
-            [MPREMOTE, "connect", esp_port,
-             "cp", LAYOUT_FILE, ":layout.json", "+",
-             "cp", MAIN_FILE, ":main.py", "+",
-             "reset"],
-            capture_output=True, text=True
-        )
+        try:
+            result = subprocess.run(
+                [MPREMOTE, "connect", esp_port,
+                 "cp", LAYOUT_FILE, ":layout.json", "+",
+                 "cp", MAIN_FILE, ":main.py", "+",
+                 "reset"],
+                capture_output=True, text=True, timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            self._respond(504, "mpremote timed out — check USB connection")
+            return
 
         if result.returncode == 0:
             self._respond(200, f"Deployed to {esp_port}")
@@ -96,6 +102,10 @@ class ReusableHTTPServer(HTTPServer):
     allow_reuse_address = True
 
 if __name__ == "__main__":
+    if not os.path.exists(LAYOUT_FILE) and os.path.exists(LAYOUT_EXAMPLE):
+        shutil.copy(LAYOUT_EXAMPLE, LAYOUT_FILE)
+        print(f"Initialized layout.json from {os.path.basename(LAYOUT_EXAMPLE)}")
+
     httpd = ReusableHTTPServer(("localhost", PORT), Handler)
     print(f"Deploy server running at http://localhost:{PORT}")
     print("Waiting for deploy requests from the editor...")
