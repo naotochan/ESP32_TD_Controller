@@ -1,5 +1,7 @@
 # ESP32 TD Controller
 
+日本語 · [English](README_EN.md)
+
 ESP32 + 2.8インチタッチスクリーンを **TouchDesigner 向け OSC コントローラ** にするプロジェクト。
 
 タッチ操作（ボタン・スライダー・カラーピッカー・ページ切替）を WiFi 経由で OSC メッセージとして送信し、TouchDesigner で受信できます。ウィジェットレイアウトは **ブラウザ上のエディタ** でドラッグ&ドロップ編集 → ワンクリックで ESP32 にデプロイできます。
@@ -126,9 +128,9 @@ OSC In CHOP を配置し **Port を 7000** に設定 → Active をオン。ESP3
 | ウィジェット | アドレス例 | 型 | 値 |
 |---|---|---|---|
 | Button | `/esp32/button/1` | float | `1.0` 押下 / `0.0` 離上 |
-| Slider | `/esp32/slider/1` | float | `0.0` 〜 `1.0` 連続値（縦） |
-| HSlider | `/esp32/hslider/1` | float | `0.0` 〜 `1.0` 連続値（横） |
-| HSVPicker | `/esp32/color/1` | float×3 | `r, g, b` (各 0.0〜1.0) |
+| Slider | `/esp32/slider/1` | float | `0.0` 〜 `255.0` 連続値（縦） |
+| HSlider | `/esp32/hslider/1` | float | `0.0` 〜 `255.0` 連続値（横） |
+| HSVPicker | `/esp32/color/1` | int×3 | `r, g, b` (各 0〜255) |
 | PageButton | — | — | ページ切替（OSC は送信しない） |
 
 アドレスはエディタで自由に変更可能。
