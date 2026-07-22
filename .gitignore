@@ -6,6 +6,9 @@ td-controller.yaml
 # Runtime-generated layout (Web editor overwrites this on every Deploy)
 layout.json
 
+# Device-specific touch calibration (copy from calib.json.example)
+calib.json
+
 # Python
 .venv/
 __pycache__/

@@ -262,6 +262,22 @@ export default function Properties({ widget, selectedIds, widgets, pageCount = 1
 
       {(widget.type === 'Slider' || widget.type === 'HSlider') && field('Default Value', 'default', 'number')}
 
+      {widget.type === 'Toggle' && (
+        <div className="prop-field">
+          <label>初期状態</label>
+          <div className="nav-mode-group">
+            <button
+              className={`nav-mode-btn ${!widget.default ? 'active' : ''}`}
+              onClick={() => onUpdate(widget.id, { default: 0 })}
+            >OFF</button>
+            <button
+              className={`nav-mode-btn ${widget.default ? 'active' : ''}`}
+              onClick={() => onUpdate(widget.id, { default: 1 })}
+            >ON</button>
+          </div>
+        </div>
+      )}
+
       {widget.type === 'HSVPicker' && (
         <div className="prop-section">
           <label>初期値 (R, G, B)</label>

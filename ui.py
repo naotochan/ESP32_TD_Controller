@@ -128,6 +128,70 @@ class Button(Widget):
         return (1.0 if self._touching else 0.0,)
 
 
+class Toggle(Widget):
+    """Latching button — tap toggles on/off, OSC sends 1.0 / 0.0."""
+
+    _ON_BG      = color565(20, 100, 70)
+    _OFF_BG     = color565(30, 40, 50)
+    _ON_BORDER  = color565(60, 220, 140)
+    _OFF_BORDER = color565(120, 130, 150)
+    _PRESS_BG   = color565(40, 140, 100)
+
+    def __init__(self, tft, x, y, w, h, label, osc_addr, default=0):
+        super().__init__(tft, x, y, w, h, osc_addr)
+        self.label = label
+        self._on = bool(default)
+        self._pending_osc = False
+
+    @property
+    def value(self):
+        return 1.0 if self._on else 0.0
+
+    def set_on(self, on, redraw=True):
+        self._on = bool(on)
+        if redraw:
+            self.draw()
+
+    def draw(self):
+        if self._touching:
+            bg, c = self._PRESS_BG, self._ON_BORDER
+        elif self._on:
+            bg, c = self._ON_BG, self._ON_BORDER
+        else:
+            bg, c = self._OFF_BG, self._OFF_BORDER
+        t = self.tft
+        t.fill_rect(self.x, self.y, self.w, self.h, bg)
+        for i in range(2):
+            bx, by = self.x + i, self.y + i
+            bw, bh = self.w - i * 2, self.h - i * 2
+            t.fill_rect(bx, by, bw, 1, c)
+            t.fill_rect(bx, by + bh - 1, bw, 1, c)
+            t.fill_rect(bx, by, 1, bh, c)
+            t.fill_rect(bx + bw - 1, by, 1, bh, c)
+        # ON indicator bar on the left
+        if self._on:
+            t.fill_rect(self.x + 3, self.y + 3, 4, self.h - 6, self._ON_BORDER)
+        text = self.label
+        lx = self.x + (self.w - len(text) * 8) // 2
+        ly = self.y + (self.h - 8) // 2
+        t.text(text, lx, ly, _LABEL_COLOR, bg)
+
+    def on_touch(self, tx, ty):
+        self._on = not self._on
+        self._pending_osc = True
+        self.draw()
+
+    def on_release(self):
+        self.draw()
+        return False
+
+    def osc_message(self):
+        if not self._pending_osc:
+            return None
+        self._pending_osc = False
+        return (1.0 if self._on else 0.0,)
+
+
 class Slider(Widget):
     """Vertical slider (0-255). Sends float value while dragging.
 
@@ -147,6 +211,12 @@ class Slider(Widget):
     @property
     def value(self):
         return self._value
+
+    def set_value(self, v, redraw=True):
+        self._value = int(max(0, min(255, v)))
+        self._prev_ky = None
+        if redraw:
+            self.draw()
 
     def _knob_y(self):
         range_px = max(self.h - 20, 1)
@@ -352,6 +422,12 @@ class HSlider(Widget):
     @property
     def value(self):
         return self._value
+
+    def set_value(self, v, redraw=True):
+        self._value = int(max(0, min(255, v)))
+        self._prev_kx = None
+        if redraw:
+            self.draw()
 
     def _knob_x(self):
         range_px = max(self.w - 20, 1)

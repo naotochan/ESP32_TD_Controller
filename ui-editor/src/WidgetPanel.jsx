@@ -1,6 +1,7 @@
 export default function WidgetPanel({ onDrop }) {
   const templates = [
-    { type: 'Button',     icon: '⬜', desc: 'トグルボタン' },
+    { type: 'Button',     icon: '⬜', desc: 'モーメンタリボタン' },
+    { type: 'Toggle',     icon: '🔘', desc: 'ラッチ型トグル' },
     { type: 'Slider',     icon: '🎚️', desc: '0-255 縦スライダー' },
     { type: 'HSlider',    icon: '↔️', desc: '0-255 横スライダー' },
     { type: 'HSVPicker',  icon: '🎨', desc: 'H/S/V ピッカー' },

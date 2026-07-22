@@ -4,6 +4,7 @@ const SCALE = 2
 
 const WIDGET_TEMPLATES = {
   Button:     { w: 105, h: 80 },
+  Toggle:     { w: 105, h: 80 },
   Slider:     { w: 30,  h: 140 },
   HSlider:    { w: 140, h: 30 },
   HSVPicker:  { w: 90,  h: 140 },
@@ -347,6 +348,24 @@ function WidgetView({ widget, isSelected, onPointerDown, scale }) {
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tr" />
         <span className="widget-label">{widget.label || 'BTN'}</span>
+        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="bl" />
+        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="br" />
+      </div>
+    )
+  }
+
+  if (widget.type === 'Toggle') {
+    const isOn = !!widget.default
+    return (
+      <div
+        className={`canvas-widget canvas-widget-toggle ${isOn ? 'toggle-on' : ''} ${isSelected ? 'selected' : ''}`}
+        style={style}
+        onPointerDown={(e) => onPointerDown(e, widget.id, 'move')}
+      >
+        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tl" />
+        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tr" />
+        <span className="toggle-indicator" />
+        <span className="widget-label">{widget.label || 'TOG'}</span>
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="bl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="br" />
       </div>

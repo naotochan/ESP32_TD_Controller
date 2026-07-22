@@ -15,13 +15,14 @@
       },
       {
         "id": 1779860556608,
-        "type": "Button",
+        "type": "Toggle",
         "x": 120,
         "y": 10,
         "w": 105,
         "h": 80,
-        "label": "BTN 2",
-        "osc_addr": "/esp32/button/2"
+        "label": "TOG 1",
+        "osc_addr": "/esp32/toggle/1",
+        "default": 0
       },
       {
         "id": 1779861108991,
@@ -30,8 +31,8 @@
         "y": 115,
         "w": 105,
         "h": 80,
-        "label": "BTN 3",
-        "osc_addr": "/esp32/button/3"
+        "label": "BTN 2",
+        "osc_addr": "/esp32/button/2"
       },
       {
         "id": 1779861284425,

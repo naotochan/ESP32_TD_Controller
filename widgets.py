@@ -5,8 +5,8 @@ ROTATION = 0
 PAGES = [
     [  # Page 1
         {"type": "Button", "x": 10, "y": 10, "w": 105, "h": 80, "label": "BTN 1", "osc_addr": "/esp32/button/1"},
-        {"type": "Button", "x": 120, "y": 10, "w": 105, "h": 80, "label": "BTN 2", "osc_addr": "/esp32/button/2"},
-        {"type": "Button", "x": 10, "y": 100, "w": 215, "h": 170, "label": "BTN 3", "osc_addr": "/esp32/button/3"},
+        {"type": "Toggle", "x": 120, "y": 10, "w": 105, "h": 80, "label": "TOG 1", "osc_addr": "/esp32/toggle/1", "default": 0},
+        {"type": "Button", "x": 10, "y": 100, "w": 215, "h": 100, "label": "BTN 2", "osc_addr": "/esp32/button/2"},
         {"type": "PageButton", "x": 10, "y": 280, "w": 60, "h": 30, "label": "PAGE 1", "nav_mode": "next"},
     ],
     [  # Page 2

@@ -1,7 +1,8 @@
 """Touch calibration utility for XPT2046.
 
-Deploy and run this script once, then paste the printed values into main.py.
-Works for both rotation=0 (portrait) and rotation=1 (landscape).
+Deploy and run once. Results are written to calib.json on the device.
+Pull to host with:  mpremote cp :calib.json calib.json
+Then ./deploy.sh will transfer calib.json automatically.
 """
 import time
 from machine import SPI, Pin
@@ -57,7 +58,6 @@ def draw_text_centered(text, y, color):
 
 def wait_for_stable_touch():
     """Wait until IRQ fires, then collect SAMPLES averaged raw readings."""
-    # Wait for touch start
     while touch.irq.value():
         time.sleep_ms(10)
     time.sleep_ms(30)  # debounce
@@ -71,7 +71,6 @@ def wait_for_stable_touch():
             readings_y.append(raw[1])
         time.sleep_ms(10)
 
-    # Wait for release
     while not touch.irq.value():
         time.sleep_ms(10)
     time.sleep_ms(50)
@@ -120,20 +119,36 @@ else:
     x_min, x_max = min(all_rx), max(all_rx)
     y_min, y_max = min(all_ry), max(all_ry)
 
+    calib = {
+        "x_min": x_min,
+        "x_max": x_max,
+        "y_min": y_min,
+        "y_max": y_max,
+    }
+
+    try:
+        import ujson
+        with open('calib.json', 'w') as f:
+            ujson.dump(calib, f)
+        saved = True
+    except Exception as e:
+        print("Failed to write calib.json:", e)
+        saved = False
+
     tft.fill(BG)
     draw_text_centered("CALIBRATION DONE", 10, GREEN)
     tft.text("x_min=" + str(x_min), 4, 40, CYAN, BG)
     tft.text("x_max=" + str(x_max), 4, 56, CYAN, BG)
     tft.text("y_min=" + str(y_min), 4, 72, CYAN, BG)
     tft.text("y_max=" + str(y_max), 4, 88, CYAN, BG)
-    draw_text_centered("See serial for main.py snippet", 110, WHITE)
+    if saved:
+        draw_text_centered("Saved calib.json", 110, GREEN)
+        draw_text_centered("mpremote cp :calib.json .", 130, WHITE)
+    else:
+        draw_text_centered("Save failed - see serial", 110, RED)
 
-    snippet = (
-        "XPT2046(spi_touch, cs=Pin(33), irq=Pin(36),\n"
-        "        x_min=" + str(x_min) + ", x_max=" + str(x_max) + ",\n"
-        "        y_min=" + str(y_min) + ", y_max=" + str(y_max) + ",\n"
-        "        screen_w=SCREEN_W, screen_h=SCREEN_H, rotation=ROTATION)"
-    )
-    print("\n--- Paste into main.py ---")
-    print("touch = " + snippet)
-    print("--------------------------")
+    print("\n--- calib.json ---")
+    print('{"x_min":%d,"x_max":%d,"y_min":%d,"y_max":%d}' % (x_min, x_max, y_min, y_max))
+    print("------------------")
+    print("Pull to host: mpremote cp :calib.json calib.json")
+    print("Then redeploy with ./deploy.sh (includes calib.json if present)")

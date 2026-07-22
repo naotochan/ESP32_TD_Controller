@@ -15,9 +15,52 @@ LAYOUT_EXAMPLE = os.path.join(SCRIPT_DIR, "layout.json.example")
 MAIN_FILE = os.path.join(SCRIPT_DIR, "main.py")
 
 
+def list_ports():
+    """Return sorted unique serial port candidates (macOS + Linux)."""
+    patterns = [
+        "/dev/cu.usbserial-*",
+        "/dev/cu.usbmodem*",
+        "/dev/ttyUSB*",
+        "/dev/ttyACM*",
+    ]
+    found = []
+    for pat in patterns:
+        found.extend(glob.glob(pat))
+    return sorted(set(found))
+
+
+def _is_preferred(path):
+    """CH340/CP210x-style ports are typical for CYD ESP32 boards."""
+    name = os.path.basename(path)
+    return "usbserial" in name or name.startswith("ttyUSB")
+
+
+def select_port(candidates=None):
+    """Pick a serial port.
+
+    Returns (port_or_None, candidates, ambiguous).
+    - 0 candidates → (None, [], False)
+    - 1 candidate → that port, not ambiguous
+    - multiple → prefer usbserial/ttyUSB; unique preferred → that port;
+      otherwise ambiguous (port=None for deploy safety)
+    """
+    ports = list(candidates) if candidates is not None else list_ports()
+    if not ports:
+        return None, [], False
+    if len(ports) == 1:
+        return ports[0], ports, False
+
+    preferred = [p for p in ports if _is_preferred(p)]
+    if len(preferred) == 1:
+        return preferred[0], ports, False
+    # Ambiguous: multiple preferred or none preferred among many
+    return None, ports, True
+
+
 def find_port():
-    candidates = glob.glob("/dev/cu.usbserial-*") + glob.glob("/dev/cu.usbmodem*")
-    return candidates[0] if candidates else None
+    """Backward-compatible: return selected port or None."""
+    port, _, _ = select_port()
+    return port
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -34,8 +77,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             return
-        esp_port = find_port()
-        body = json.dumps({"port": esp_port}).encode()
+        port, ports, ambiguous = select_port()
+        body = json.dumps({
+            "port": port,
+            "ports": ports,
+            "count": len(ports),
+            "ambiguous": ambiguous,
+        }).encode()
         self.send_response(200)
         self._cors()
         self.send_header("Content-Type", "application/json")
@@ -66,9 +114,17 @@ class Handler(BaseHTTPRequestHandler):
         with open(LAYOUT_FILE, "w") as f:
             json.dump(data, f, indent=2)
 
-        esp_port = find_port()
-        if not esp_port:
+        esp_port, ports, ambiguous = select_port()
+        if not ports:
             self._respond(503, "ESP32 not found. Connect via USB.")
+            return
+        if ambiguous or not esp_port:
+            listing = ", ".join(ports)
+            self._respond(
+                503,
+                f"Multiple serial ports ({len(ports)}): {listing}. "
+                f"Disconnect extras or use ./deploy-layout.sh <port>",
+            )
             return
 
         try:

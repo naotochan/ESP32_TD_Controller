@@ -4,13 +4,21 @@
 
 Turn an ESP32 + 2.8" touch screen into an **OSC controller for TouchDesigner**.
 
-Touch interactions (buttons, sliders, color pickers, page switching) are sent as OSC messages over WiFi to TouchDesigner. The widget layout is editable via a **browser-based editor**: drag-and-drop widgets and deploy to the ESP32 with one click.
+Touch interactions (buttons, toggles, sliders, color pickers, page switching) are sent as OSC messages over WiFi to TouchDesigner. The widget layout is editable via a **browser-based editor**: drag-and-drop widgets and deploy to the ESP32 with one click.
 
 ```
-[Web Editor] --Deploy Button--> [Local Deploy Server] --USB--> [ESP32]
-                                                                     ↓ WiFi
-                                                            [TouchDesigner (OSC In CHOP)]
+┌─────────────┐     Deploy      ┌──────────────┐     USB      ┌─────────┐
+│  Web Editor │ ──────────────► │  server.py   │ ──────────► │  ESP32  │
+│  :5173      │   layout.json   │  :3737       │  mpremote   │  (CYD)  │
+└─────────────┘                 └──────────────┘             └────┬────┘
+                                                                  │ OSC/UDP
+                                                                  ▼
+                                                           ┌─────────────┐
+                                                           │TouchDesigner│
+                                                           └─────────────┘
 ```
+
+**Version:** 0.2.0
 
 ---
 
@@ -30,19 +38,23 @@ Touch interactions (buttons, sliders, color pickers, page switching) are sent as
 ```bash
 git clone https://github.com/naotochan/ESP32_TD_Controller.git
 cd ESP32_TD_Controller
-uv venv
-uv pip install "esptool<5" mpremote
+uv sync
 cd ui-editor && npm install && cd ..
 ```
+
+`uv sync` installs dependencies from `pyproject.toml` (`esptool<5`, `mpremote`) into `.venv`. Alternative: `uv venv && uv pip install "esptool<5" mpremote`.
 
 ### 2. Connect the ESP32 and check the port
 
 ```bash
+# macOS
 ls /dev/cu.usbserial-* /dev/cu.usbmodem*
-# Example: /dev/cu.usbserial-110
+# Linux
+ls /dev/ttyUSB* /dev/ttyACM*
+# Example: /dev/cu.usbserial-110  or  /dev/ttyUSB0
 ```
 
-**Replace the port name in the commands below with your actual device path.**
+**Replace the port name in the commands below with your actual device path.** If multiple candidates appear, do not rely on auto-detect — specify the port explicitly.
 
 ### 3. Flash MicroPython (first time only)
 
@@ -61,6 +73,7 @@ WIFI_SSID=your_wifi_ssid
 WIFI_PASSWORD=your_wifi_password
 OSC_HOST=192.168.x.x        # IP of the machine running TouchDesigner
 OSC_PORT=7000
+# OSC_LISTEN_PORT=7001      # optional: TD→ESP32 receive (omit to disable)
 EOF
 ```
 
@@ -70,15 +83,19 @@ EOF
 ./deploy.sh
 # If auto-detection fails or multiple devices are connected, specify the port explicitly
 ./deploy.sh /dev/cu.usbserial-XXX
+# Linux example
+./deploy.sh /dev/ttyUSB0
 ```
 
-This writes `boot.py` / `main.py` / `ui.py` / `widgets.py` / `lib/*` / `.env` to the ESP32 and reboots it.
+This writes `boot.py` / `main.py` / `ui.py` / `widgets.py` / `layout.json` / `lib/*` / `.env` (and `calib.json` if present) to the ESP32 and reboots. If `layout.json` is missing, it is copied from `layout.json.example`.
 
 **If another USB serial device is connected, the wrong target may be written. Disconnect other devices or specify the correct port.**
 
 ### 6. TouchDesigner side
 
 Place an OSC In CHOP, set **Port to 7000**, and enable Active. Touch input from the ESP32 will flow into the CHOP.
+
+For TD→ESP32 (remote slider/toggle updates), add `OSC_LISTEN_PORT=7001` to `.env`, redeploy, and send OSC to that port from TD.
 
 ---
 
@@ -93,11 +110,9 @@ Once initial setup (venv / `npm install` / flashing MicroPython / creating `.env
 # → Launches editor (http://localhost:5173) and deploy server (port 3737) together
 ```
 
-Drag-and-drop widgets in the browser to arrange and edit them, then hit **Deploy** — `layout.json` is transferred to the ESP32 which auto-reboots. The ESP32 connection status is shown at the top-right of the editor; replugging the USB cable triggers automatic re-detection.
+Drag-and-drop widgets in the browser, then hit **Deploy** — `layout.json` is transferred to the ESP32 which auto-reboots. Connection status (candidate count / selected port) is shown at the top-right; ambiguous multi-port situations show a warning.
 
 ### Deploy layout only from CLI
-
-When you want to push a saved `layout.json` via command line:
 
 ```bash
 ./deploy-layout.sh
@@ -107,11 +122,21 @@ When you want to push a saved `layout.json` via command line:
 ### When code or `.env` changes
 
 ```bash
-./deploy.sh                              # Re-transfer all files
+./deploy.sh
 ./deploy.sh /dev/cu.usbserial-XXX
 ```
 
-Use this when you've edited `main.py`, `ui.py`, `lib/*`, `boot.py`, or `.env`.
+### Touch calibration
+
+```bash
+./.venv/bin/mpremote connect /dev/cu.usbserial-XXX cp calibrate_touch.py :calibrate_touch.py
+./.venv/bin/mpremote connect /dev/cu.usbserial-XXX exec "import calibrate_touch"
+# After on-screen prompts, pull results to the host:
+./.venv/bin/mpremote cp :calib.json calib.json
+./deploy.sh   # transfers calib.json when present
+```
+
+`main.py` loads calibration in order: `calib.json` → `.env` `CALIB_*` → built-in defaults.
 
 ### Inspect ESP32 behavior (REPL)
 
@@ -128,12 +153,15 @@ Use this when you've edited `main.py`, `ui.py`, `lib/*`, `boot.py`, or `.env`.
 | Widget | Address Example | Type | Value |
 |---|---|---|---|
 | Button | `/esp32/button/1` | float | `1.0` press / `0.0` release |
+| Toggle | `/esp32/toggle/1` | float | `1.0` ON / `0.0` OFF (latching) |
 | Slider | `/esp32/slider/1` | float | `0.0` — `255.0` continuous (vertical) |
 | HSlider | `/esp32/hslider/1` | float | `0.0` — `255.0` continuous (horizontal) |
 | HSVPicker | `/esp32/color/1` | int×3 | `r, g, b` (each 0—255) |
 | PageButton | — | — | Page switch (no OSC sent) |
 
 Addresses can be freely changed in the editor.
+
+**Receive (optional):** When `OSC_LISTEN_PORT` is set, sending a float to the same address updates Slider / HSlider / Toggle display values.
 
 ---
 
@@ -145,20 +173,23 @@ Addresses can be freely changed in the editor.
 ├── deploy-layout.sh      # Transfer only layout.json and main.py
 ├── start.sh              # Launch editor + deploy server together
 ├── server.py             # Local deploy server (receives POST from editor)
+├── pyproject.toml        # Python deps (esptool, mpremote)
 ├── boot.py               # WiFi connection at startup
-├── main.py               # Main loop: touch → widget processing → OSC send
-├── ui.py                 # Widget classes (Button / Slider / HSlider / HSVPicker / IPDisplay / PageButton)
-├── widgets.py            # Fallback initial layout (used when layout.json is absent)
-├── layout.json.example   # Sample copied to layout.json on first boot (layout.json itself is not tracked by git)
+├── main.py               # Main loop: touch → widget processing → OSC
+├── ui.py                 # Widget classes (Button / Toggle / Slider / …)
+├── widgets.py            # Fallback initial layout
+├── layout.json.example   # Sample for layout.json (layout.json is not tracked)
+├── calib.json.example    # Sample touch calibration (calib.json is not tracked)
+├── calibrate_touch.py    # Touch calibration utility
 ├── lib/
 │   ├── ili9341.py        # TFT display driver
 │   ├── xpt2046.py        # Touch panel driver
-│   ├── osc.py            # OSC 1.0 UDP transmit
+│   ├── osc.py            # OSC 1.0 UDP send/receive
 │   └── dotenv.py         # .env parser (for MicroPython)
 ├── ui-editor/            # Browser-based layout editor (Vite + React)
 ├── micropython_esp32.bin # ESP32 MicroPython firmware (v1.25.0)
 ├── LICENSE               # MIT
-└── .env                  # WiFi / OSC settings (not tracked by git, create yourself)
+└── .env                  # WiFi / OSC settings (not tracked by git)
 ```
 
 ---
@@ -172,26 +203,28 @@ Addresses can be freely changed in the editor.
 | SD MOSI / MISO / SCK / CS | 23 / 19 / 18 / 5 |
 | RGB LED (active LOW) | R=4, G=16, B=17 |
 
+Back silkscreen reference photo: `back_silkscreen_spec.jpg`
+
 ---
 
 ## Troubleshooting
 
-### Screen stays black
+### Screen shows ERROR / stays black
 
-Most likely a missing `.env` file causing `KeyError`. Running `./deploy.sh` auto-transfers `.env`. First confirm that `.env` exists in the project root.
+Missing `.env` or required keys are shown on the display. Running `./deploy.sh` transfers `.env` — confirm it exists in the project root.
 
-To see runtime errors:
+WiFi FAILED is also shown on screen (UI still runs; OSC is skipped).
 
 ```bash
 ./.venv/bin/mpremote connect /dev/cu.usbserial-110 repl
 # Press physical RST to see boot.py / main.py output
-# Ctrl+X to exit
 ```
 
 ### Web Editor "Deploy" fails
 
-- Is the ESP32 connected via USB? (check status indicator at top-right of editor)
-- Is the deploy server running on port 3737? (auto-starts when launched via `./start.sh`)
+- Is the ESP32 connected via USB? (check status indicator at top-right)
+- Are multiple ports ambiguous? (unplug extras or specify port via CLI)
+- Is the deploy server running on port 3737? (auto-starts via `./start.sh`)
 
 ### Nuclear option
 

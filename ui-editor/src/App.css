@@ -72,6 +72,13 @@
   color: var(--text-primary);
 }
 
+.app-version {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -191,6 +198,11 @@
 .device-status.offline {
   color: var(--text-muted);
   opacity: 0.5;
+}
+
+.device-status.ambiguous {
+  color: #e6a817;
+  background: rgba(230, 168, 23, 0.15);
 }
 
 .export-btn.deploy {
@@ -493,6 +505,39 @@
 
 .canvas-widget-button.selected {
   border-color: var(--accent-primary);
+}
+
+/* Toggle widget — distinct from momentary Button */
+.canvas-widget-toggle {
+  background: #2a3038;
+  border-color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.canvas-widget-toggle.toggle-on {
+  background: #1a5c42;
+  box-shadow: inset 0 0 0 2px #3cdb8e;
+}
+
+.canvas-widget-toggle.selected {
+  border-color: var(--accent-primary);
+}
+
+.toggle-indicator {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  bottom: 6px;
+  width: 5px;
+  border-radius: 1px;
+  background: #556;
+}
+
+.canvas-widget-toggle.toggle-on .toggle-indicator {
+  background: #3cdb8e;
 }
 
 /* Slider widget */

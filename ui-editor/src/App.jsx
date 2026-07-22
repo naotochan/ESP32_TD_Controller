@@ -12,6 +12,7 @@ const LANDSCAPE = { w: 320, h: 240 }
 
 const WIDGET_TEMPLATES = {
   Button:     { type: 'Button',     w: 105, h: 80 },
+  Toggle:     { type: 'Toggle',     w: 105, h: 80 },
   Slider:     { type: 'Slider',     w: 30,  h: 140 },
   HSlider:    { type: 'HSlider',    w: 140, h: 30 },
   HSVPicker:  { type: 'HSVPicker',  w: 90,  h: 140 },
@@ -97,7 +98,7 @@ export default function App() {
     let ny = Math.max(0, Math.min(screenH - tmpl.h, y || 10))
 
     const labels = {
-      Button: 'BTN ', Slider: 'SLIDER ', HSlider: 'HSLIDER ',
+      Button: 'BTN ', Toggle: 'TOG ', Slider: 'SLIDER ', HSlider: 'HSLIDER ',
       HSVPicker: 'HSV ', IPDisplay: 'IP:', PageButton: 'PAGE ',
     }
     const newWidget = {
@@ -106,6 +107,7 @@ export default function App() {
       x: nx, y: ny, w: tmpl.w, h: tmpl.h,
       label: (labels[templateType] || '') + count,
       osc_addr: templateType === 'Button'      ? `/esp32/button/${count}`
+               : templateType === 'Toggle'     ? `/esp32/toggle/${count}`
                : templateType === 'Slider'     ? `/esp32/slider/${count}`
                : templateType === 'HSlider'    ? `/esp32/hslider/${count}`
                : templateType === 'HSVPicker'  ? `/esp32/color/${count}`
@@ -113,6 +115,7 @@ export default function App() {
                : '',
     }
     if (templateType === 'Slider' || templateType === 'HSlider') newWidget.default = 127
+    if (templateType === 'Toggle') newWidget.default = 0
     if (templateType === 'HSVPicker') newWidget.default = [127, 127, 127]
     if (templateType === 'PageButton') { newWidget.target_page = 1; newWidget.nav_mode = 'goto' }
 
@@ -248,7 +251,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>ESP32 UI Layout Editor</h1>
+        <h1>ESP32 UI Layout Editor <span className="app-version">v0.2.0</span></h1>
         <div className="header-actions">
           <ExportButton
             pages={pagesState.value}
