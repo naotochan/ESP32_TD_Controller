@@ -189,48 +189,6 @@ Addresses can be freely changed in the editor.
 
 ---
 
-## File Structure
-
-```
-.
-├── deploy.sh             # Transfer all files to ESP32 + reboot
-├── deploy-layout.sh      # Transfer only layout.json and main.py
-├── start.sh              # Launch editor + deploy server together
-├── server.py             # Local deploy server (receives POST from editor)
-├── pyproject.toml        # Python deps (esptool, mpremote)
-├── boot.py               # WiFi connection at startup
-├── main.py               # Main loop: touch → widget processing → OSC
-├── ui.py                 # Widget classes (Button / Toggle / Slider / …)
-├── widgets.py            # Fallback initial layout
-├── layout.json.example   # Sample for layout.json (layout.json is not tracked)
-├── calib.json.example    # Sample touch calibration (calib.json is not tracked)
-├── calibrate_touch.py    # Touch calibration utility
-├── lib/
-│   ├── ili9341.py        # TFT display driver
-│   ├── xpt2046.py        # Touch panel driver
-│   ├── osc.py            # OSC 1.0 UDP send/receive
-│   └── dotenv.py         # .env parser (for MicroPython)
-├── ui-editor/            # Browser-based layout editor (Vite + React)
-├── micropython_esp32.bin # ESP32 MicroPython firmware (v1.25.0)
-├── LICENSE               # MIT
-└── .env                  # WiFi / OSC settings (not tracked by git)
-```
-
----
-
-## Pinout (ESP32-2432S028R Dual USB Variant)
-
-| Purpose | Pin |
-|---|---|
-| TFT MOSI / MISO / SCK / CS / DC / BL | 13 / 12 / 14 / 15 / 2 / 21 |
-| Touch MOSI / MISO / SCK / CS / IRQ | 32 / 39 / 25 / 33 / 36 |
-| SD MOSI / MISO / SCK / CS | 23 / 19 / 18 / 5 |
-| RGB LED (active LOW) | R=4, G=16, B=17 |
-
-Back silkscreen reference photo: `back_silkscreen_spec.jpg`
-
----
-
 ## Troubleshooting
 
 ### Screen shows ERROR / stays black
