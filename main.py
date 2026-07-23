@@ -1,5 +1,8 @@
 """ESP32 TD Controller - main entry point."""
-__version__ = "0.2.1"
+__version__ = "0.3.3"
+
+# Reserved footer height (IP left + version right). Always at bottom of current rotation.
+STATUS_H = 14
 
 import time
 from machine import SPI, Pin
@@ -7,29 +10,53 @@ from lib.dotenv import load
 from lib.ili9341 import ILI9341, color565, WHITE, RED
 from lib.xpt2046 import XPT2046
 from lib.osc import OSCSender, OSCReceiver
-from ui import Button, Toggle, Slider, HSlider, HSVPicker, IPDisplay, PageButton
+from ui import Button, Toggle, Slider, HSlider, PageButton
 
 # Default touch calibration (overridden by calib.json / CALIB_* in .env)
 _DEFAULT_CALIB = dict(x_min=350, x_max=3799, y_min=199, y_max=3721)
+
+
+def _degrees_to_madctl(deg):
+    """Counter-clockwise degrees (0/90/180/270) → ILI9341 MADCTL index 0..3.
+
+    Hardware MADCTL steps are clockwise, so CCW degrees are inverted:
+      0°→0, 90°CCW→3, 180°→2, 270°CCW→1
+    """
+    try:
+        d = int(deg) % 360
+    except (TypeError, ValueError):
+        return 0
+    if d in (0, 90, 180, 270):
+        return (4 - d // 90) % 4
+    # Legacy raw MADCTL index 0..3
+    return d % 4
+
+
+def _normalize_rotation(d):
+    """Map layout JSON rotation to ILI9341 index 0..3."""
+    if isinstance(d, dict) and 'rotation' in d:
+        return _degrees_to_madctl(d.get('rotation', 0))
+    if isinstance(d, dict) and d.get('orientation') == 'landscape':
+        return 1
+    return 0
 
 
 def _load_layout():
     try:
         import ujson
         with open('layout.json') as f:
-            d = ujson.load(f)
-        return d.get('orientation', 'portrait'), d.get('rotation', 0), d.get('pages', [[]])
+            data = ujson.load(f)
+        return _normalize_rotation(data), data.get('pages', [[]])
     except Exception:
         pass
 
     try:
         import widgets as _w
-        orientation = getattr(_w, 'ORIENTATION', 'portrait')
-        rotation    = getattr(_w, 'ROTATION',    0)
-        pages       = getattr(_w, 'PAGES', None) or [getattr(_w, 'WIDGETS', [])]
-        return orientation, rotation, pages
+        return _degrees_to_madctl(getattr(_w, 'ROTATION', 0)), (
+            getattr(_w, 'PAGES', None) or [getattr(_w, 'WIDGETS', [])]
+        )
     except ImportError:
-        return 'portrait', 0, [[]]
+        return 0, [[]]
 
 
 def _load_calib(env):
@@ -93,8 +120,8 @@ def _show_error(tft, lines, fatal=True):
             time.sleep(1)
 
 
-ORIENTATION, ROTATION, PAGES = _load_layout()
-SCREEN_W, SCREEN_H = (320, 240) if ORIENTATION == "landscape" else (240, 320)
+ROTATION, PAGES = _load_layout()
+SCREEN_W, SCREEN_H = (320, 240) if (ROTATION % 2) else (240, 320)
 
 # --- Hardware (TFT first so we can show errors) ---
 spi_tft = SPI(1, baudrate=40_000_000, sck=Pin(14), mosi=Pin(13), miso=Pin(12))
@@ -152,7 +179,7 @@ if _listen:
 # --- Instantiate widgets for all pages ---
 WIDGET_MAP = {
     "Button": Button, "Toggle": Toggle, "Slider": Slider, "HSlider": HSlider,
-    "HSVPicker": HSVPicker, "IPDisplay": IPDisplay, "PageButton": PageButton,
+    "PageButton": PageButton,
 }
 
 all_pages = []
@@ -193,24 +220,29 @@ def _status_ip():
 
 
 def _draw_status():
-    """Always-on footer: IP (left) + version (right)."""
+    """Draw IP + version footer. Call only from draw_page or overlap restore."""
+    sw = tft.width
+    sh = tft.height
     bg = color565(10, 10, 20)
     fg = color565(140, 140, 160)
-    y = SCREEN_H - 12
+    y = sh - STATUS_H + 2
     ip = _status_ip()
     ver = "v" + __version__
-    # Clear footer strip so redraws don't ghost
-    tft.fill_rect(0, y - 2, SCREEN_W, 14, bg)
+    tft.fill_rect(0, sh - STATUS_H, sw, STATUS_H, bg)
     tft.text(ip, 4, y, fg, bg)
-    vx = max(0, SCREEN_W - len(ver) * 8 - 4)
+    vx = max(0, sw - len(ver) * 8 - 4)
     tft.text(ver, vx, y, fg, bg)
+
+
+def _widget_overlaps_status(w):
+    return (w.y + w.h) > (tft.height - STATUS_H)
 
 
 def draw_page(page_idx):
     tft.fill(color565(10, 10, 20))
     for w in all_pages[page_idx]:
         w.draw()
-    _draw_status()
+    _draw_status()  # paint once; stays until next draw_page / overlap restore
 
 
 def _apply_inbound(addr, args):
@@ -219,6 +251,7 @@ def _apply_inbound(addr, args):
     if not widgets or not args:
         return False
     redraw = False
+    overlapped = False
     for w in widgets:
         if isinstance(w, (Slider, HSlider)):
             try:
@@ -227,7 +260,10 @@ def _apply_inbound(addr, args):
                 continue
             on_page = w in all_pages[current_page]
             w.set_value(v, redraw=on_page)
-            redraw = redraw or on_page
+            if on_page:
+                redraw = True
+                if _widget_overlaps_status(w):
+                    overlapped = True
         elif isinstance(w, Toggle):
             try:
                 on = float(args[0]) >= 0.5
@@ -235,7 +271,12 @@ def _apply_inbound(addr, args):
                 continue
             on_page = w in all_pages[current_page]
             w.set_on(on, redraw=on_page)
-            redraw = redraw or on_page
+            if on_page:
+                redraw = True
+                if _widget_overlaps_status(w):
+                    overlapped = True
+    if overlapped:
+        _draw_status()
     return redraw
 
 
@@ -287,6 +328,8 @@ try:
                                 _last_osc[wid] = now
                         else:
                             _safe_send(w.osc_addr, *msg)
+                    if _widget_overlaps_status(w):
+                        _draw_status()
                 break
 
         time.sleep_ms(10)

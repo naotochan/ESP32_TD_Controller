@@ -1,9 +1,9 @@
 const TYPE_ICONS = {
   Button:    '⬜',
+  Toggle:    '🔘',
   Slider:    '🎚️',
   HSlider:   '↔️',
-  HSVPicker: '🎨',
-  IPDisplay: '🌐',
+  PageButton:'▶',
 }
 
 export default function LayersPanel({ widgets, selectedIds, onSelect, onReorder }) {

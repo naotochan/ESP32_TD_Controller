@@ -18,7 +18,7 @@ ESP32 + 2.8インチタッチスクリーンを **TouchDesigner 向け OSC コ�
                                                            └─────────────┘
 ```
 
-**Version:** 0.2.1
+**Version:** 0.3.3
 
 ---
 
@@ -156,7 +156,6 @@ TD→ESP32（スライダー等のリモート更新）を使う場合は `.env`
 | Toggle | `/esp32/toggle/1` | float | `1.0` ON / `0.0` OFF（ラッチ） |
 | Slider | `/esp32/slider/1` | float | `0.0` 〜 `255.0` 連続値（縦） |
 | HSlider | `/esp32/hslider/1` | float | `0.0` 〜 `255.0` 連続値（横） |
-| HSVPicker | `/esp32/color/1` | int×3 | `r, g, b` (各 0〜255) |
 | PageButton | — | — | ページ切替（OSC は送信しない） |
 
 アドレスはエディタで自由に変更可能。
@@ -240,8 +239,10 @@ flash 全消去 → MicroPython 焼き直し → `deploy.sh` で全部入れ直�
 
 ## CYD ハードウェアの注意点
 
-- **display rotation**: `rotation=0` が縦向き portrait (240×320)。`ili9341.py` の `set_rotation()` は `r % 2 == 0` のとき `width=240, height=320` を設定（横向きと逆）
-- **タッチ X 軸反転**: XPT2046 の X 座標は物理的に左右逆なので `xpt2046.py` 内で `sx = screen_w - 1 - sx` で反転済み
+- **display rotation**: `layout.json` の `rotation` は **0 / 90 / 180 / 270**（**反時計回り / CCW**）。ファームは MADCTL index に変換（90°CCW→index 3）。偶数 index → 240×320、奇数 → 320×240
+- **Web エディタ**: 回転プルダウンは CCW。キャンバス枠に **USB** / **microSD**（0°: USB=下、90°CCW: USB=右・microSD=左）
+- **タッチ X 軸反転**: XPT2046 の生 X は物理的に左右逆なので `xpt2046.py` 内で rotation ごとに補正済み
+- 旧 `orientation: portrait|landscape` + `rotation: 0|1` も読み込み互換あり
 
 ---
 

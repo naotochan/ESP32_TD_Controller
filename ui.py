@@ -1,5 +1,4 @@
 """UI widget framework for ILI9341 display."""
-import math
 from lib.ili9341 import WHITE, BLACK, GRAY, color565
 
 # --- Color palette ---
@@ -10,44 +9,6 @@ _NORMAL_BORDER  = color565(180, 180, 220)
 _LABEL_COLOR    = WHITE
 
 
-def _hsv_to_rgb(h, s, v):
-    """h, s, v in [0.0, 1.0]. Returns (r, g, b) each in [0, 255]."""
-    if s == 0:
-        c = int(v * 255)
-        return c, c, c
-    h6 = h * 6.0
-    i = int(h6) % 6
-    f = h6 - int(h6)
-    p = v * (1.0 - s)
-    q = v * (1.0 - f * s)
-    t = v * (1.0 - (1.0 - f) * s)
-    if i == 0:   r, g, b = v, t, p
-    elif i == 1: r, g, b = q, v, p
-    elif i == 2: r, g, b = p, v, t
-    elif i == 3: r, g, b = p, q, v
-    elif i == 4: r, g, b = t, p, v
-    else:        r, g, b = v, p, q
-    return int(r * 255), int(g * 255), int(b * 255)
-
-
-def _rgb_to_hsv(r, g, b):
-    """r, g, b in [0.0, 1.0]. Returns (h, s, v) each in [0.0, 1.0]."""
-    max_c = max(r, g, b)
-    min_c = min(r, g, b)
-    diff = max_c - min_c
-    v = max_c
-    s = diff / max_c if max_c > 0 else 0.0
-    if diff == 0:
-        return 0.0, s, v
-    if max_c == r:
-        h = ((g - b) / diff) % 6 / 6.0
-    elif max_c == g:
-        h = ((b - r) / diff + 2.0) / 6.0
-    else:
-        h = ((r - g) / diff + 4.0) / 6.0
-    return h, s, v
-
-
 class Widget:
     """Base class for all UI widgets.
 
@@ -55,7 +16,7 @@ class Widget:
     - on_release() must return True to trigger OSC on release, False to suppress.
     process(pos) dispatches to these handlers automatically.
     """
-    throttle = False  # set True on continuous-value widgets (Slider, HSVPicker)
+    throttle = False  # set True on continuous-value widgets (Slider, HSlider)
 
     def __init__(self, tft, x, y, w, h, osc_addr):
         self.tft = tft
@@ -196,15 +157,18 @@ class Slider(Widget):
     """Vertical slider (0-255). Sends float value while dragging.
 
     Uses differential drawing: only the knob is redrawn on move.
+    Optional label is drawn at the bottom of the widget.
     """
     throttle = True
     _KNOB_W = 4
+    _LABEL_H = 10
     _TRACK_COLOR = color565(80, 80, 100)
     _KNOB_COLOR  = color565(100, 180, 255)
     _KNOB_PRESSED = color565(140, 210, 255)
 
     def __init__(self, tft, x, y, w, h, osc_addr, default=127, label=''):
         super().__init__(tft, x, y, w, h, osc_addr)
+        self.label = label or ''
         self._value = default
         self._prev_ky = None
 
@@ -218,20 +182,45 @@ class Slider(Widget):
         if redraw:
             self.draw()
 
+    def _label_reserve(self):
+        return self._LABEL_H if self.label else 0
+
+    def _track_top(self):
+        return self.y + 8
+
+    def _track_bot(self):
+        return self.y + self.h - 8 - self._label_reserve()
+
     def _knob_y(self):
-        range_px = max(self.h - 20, 1)
-        return self.y + 10 + int(range_px * (1 - self._value / 255))
+        top = self._track_top() + 2
+        bot = self._track_bot() - 2
+        range_px = max(bot - top, 1)
+        return top + int(range_px * (1 - self._value / 255))
+
+    def _draw_label(self):
+        if not self.label:
+            return
+        t = self.tft
+        max_chars = max(1, self.w // 8)
+        text = self.label[:max_chars]
+        lx = self.x + (self.w - len(text) * 8) // 2
+        ly = self.y + self.h - 9
+        t.text(text, lx, ly, _LABEL_COLOR, BLACK)
 
     def draw(self):
         """Full redraw: called on touch start and release."""
         t = self.tft
         cx = self.x + self.w // 2
         t.fill_rect(self.x, self.y, self.w, self.h, BLACK)
-        t.fill_rect(cx - 1, self.y + 8, 3, self.h - 16, self._TRACK_COLOR)
+        top = self._track_top()
+        bot = self._track_bot()
+        th = max(bot - top, 1)
+        t.fill_rect(cx - 1, top, 3, th, self._TRACK_COLOR)
         ky = self._knob_y()
         kc = self._KNOB_PRESSED if self._touching else self._KNOB_COLOR
         t.fill_rect(cx - self._KNOB_W // 2, ky - 4, self._KNOB_W, 9, kc)
         self._prev_ky = ky
+        self._draw_label()
 
     def _move_knob(self):
         """Differential update: erase old knob, restore track, draw new knob."""
@@ -241,12 +230,14 @@ class Slider(Widget):
         t = self.tft
         cx = self.x + self.w // 2
         kw2 = self._KNOB_W // 2
+        top = self._track_top()
+        bot = self._track_bot()
 
         # Erase old knob and restore track pixels
         if self._prev_ky is not None:
             t.fill_rect(cx - kw2, self._prev_ky - 4, self._KNOB_W, 9, BLACK)
-            tk_top = max(self.y + 8, self._prev_ky - 4)
-            tk_bot = min(self.y + self.h - 12, self._prev_ky + 5)
+            tk_top = max(top, self._prev_ky - 4)
+            tk_bot = min(bot, self._prev_ky + 5)
             if tk_bot > tk_top:
                 t.fill_rect(cx - 1, tk_top, 3, tk_bot - tk_top, self._TRACK_COLOR)
 
@@ -254,8 +245,10 @@ class Slider(Widget):
         self._prev_ky = ky
 
     def _set_value(self, ty):
-        range_px = max(self.h - 20, 1)
-        ratio = (ty - (self.y + 10)) / range_px
+        top = self._track_top() + 2
+        bot = self._track_bot() - 2
+        range_px = max(bot - top, 1)
+        ratio = (ty - top) / range_px
         self._value = int((1 - max(0.0, min(1.0, ratio))) * 255)
 
     def on_touch(self, tx, ty):
@@ -277,145 +270,21 @@ class Slider(Widget):
         return (float(self._value),)
 
 
-class HSVPicker(Widget):
-    """Circular HSV color picker widget.
+class HSlider(Widget):
+    """Horizontal slider (0-255). Sends float value while dragging.
 
-    Layout:
-      - Color wheel (left): angle=hue, radius=saturation
-      - Value bar (right): vertical gradient, top=bright, bottom=dark
-
-    OSC: sends (r, g, b) as 3 int arguments (0-255).
+    Optional label is drawn above the track.
     """
     throttle = True
-    _BAR_W   = 16
-    _BAR_PAD = 4
-    _N_SEG   = 18
-
-    def __init__(self, tft, x, y, w, h, osc_addr, default=(127, 127, 127), label=''):
-        super().__init__(tft, x, y, w, h, osc_addr)
-        r, g, b = [c / 255.0 for c in default]
-        self._h, self._s, self._v = _rgb_to_hsv(r, g, b)
-        self._active = None   # 'hs' | 'val'
-
-    def _rgb(self):
-        return _hsv_to_rgb(self._h, self._s, self._v)
-
-    @property
-    def _cx(self):
-        return self.x + (self.w - self._BAR_W - self._BAR_PAD) // 2
-
-    @property
-    def _cy(self):
-        return self.y + self.h // 2
-
-    @property
-    def _radius(self):
-        return (self.w - self._BAR_W - self._BAR_PAD - 4) // 2
-
-    @property
-    def _bar_x(self):
-        return self.x + self.w - self._BAR_W - 2
-
-    # --- Drawing ---
-    def _draw_wheel(self):
-        t = self.tft
-        r = self._radius
-        n = self._N_SEG
-        seg_w = (2 * r) // n
-
-        for dy in range(-r, r + 1):
-            dy2 = dy * dy
-            dx_o = int((r * r - dy2) ** 0.5)
-            if dx_o < 1:
-                continue
-
-            yo = self._cy + dy
-            x_lo = self._cx - dx_o
-            x_hi = self._cx + dx_o
-
-            for i in range(n):
-                sx = -r + i * seg_w
-                ex = sx + seg_w - 1
-                if ex < x_lo - self._cx or sx > x_hi - self._cx:
-                    continue
-
-                mx = (sx + ex) // 2
-                angle = math.atan2(dy, mx)
-                h = (angle / math.pi * 0.5 + 1.0) % 1.0
-                rr, gg, bb = _hsv_to_rgb(h, 1.0, 1.0)
-
-                dx = max(x_lo, self._cx + sx)
-                dw = min(x_hi, self._cx + ex) - dx + 1
-                if dw > 0:
-                    t.fill_rect(dx, yo, dw, 1, color565(rr, gg, bb))
-
-    def _draw_value_bar(self):
-        t = self.tft
-        bx = self._bar_x
-        rh, rg, rb = self._rgb()
-        for dy in range(self.h):
-            vf = 1.0 - dy / max(1, self.h - 1)
-            t.fill_rect(bx, self.y + dy, self._BAR_W, 1,
-                        color565(int(rh * vf), int(rg * vf), int(rb * vf)))
-
-    def draw(self):
-        t = self.tft
-        t.fill_rect(self.x, self.y, self.w, self.h, BLACK)
-        self._draw_wheel()
-        self._draw_value_bar()
-
-    # --- Touch handling ---
-    def _find_zone(self, tx, ty):
-        if tx >= self._bar_x:
-            return 'val'
-        dx = tx - self._cx
-        dy = ty - self._cy
-        if (dx * dx + dy * dy) <= self._radius * self._radius:
-            return 'hs'
-        return None
-
-    def _update_from_touch(self, tx, ty):
-        if self._active == 'hs':
-            dx = tx - self._cx
-            dy = ty - self._cy
-            angle = math.atan2(-dy, dx)
-            self._h = (angle / math.pi * 0.5 + 1.0) % 1.0
-            dist = (dx * dx + dy * dy) ** 0.5
-            self._s = min(1.0, dist / max(1, self._radius))
-        elif self._active == 'val':
-            self._v = max(0.0, min(1.0, 1.0 - (ty - self.y) / max(1, self.h - 1)))
-
-    def on_touch(self, tx, ty):
-        self._active = self._find_zone(tx, ty)
-        if self._active:
-            self._update_from_touch(tx, ty)
-            self.draw()
-
-    def on_move(self, tx, ty):
-        if not self._active:
-            return
-        self._update_from_touch(tx, ty)
-        self.draw()
-
-    def on_release(self):
-        self._active = None
-        return False
-
-    def osc_message(self):
-        r, g, b = self._rgb()
-        return (r, g, b)
-
-
-class HSlider(Widget):
-    """Horizontal slider (0-255). Sends float value while dragging."""
-    throttle = True
     _KNOB_W      = 4
+    _LABEL_H     = 10
     _TRACK_COLOR  = color565(80, 80, 100)
     _KNOB_COLOR   = color565(100, 180, 255)
     _KNOB_PRESSED = color565(140, 210, 255)
 
     def __init__(self, tft, x, y, w, h, osc_addr, default=127, label=''):
         super().__init__(tft, x, y, w, h, osc_addr)
+        self.label = label or ''
         self._value = default
         self._prev_kx = None
 
@@ -429,35 +298,60 @@ class HSlider(Widget):
         if redraw:
             self.draw()
 
+    def _label_reserve(self):
+        return self._LABEL_H if self.label else 0
+
+    def _track_y(self):
+        # Center track in the area below the label strip.
+        top = self.y + self._label_reserve()
+        return top + (self.h - self._label_reserve()) // 2
+
     def _knob_x(self):
         range_px = max(self.w - 20, 1)
         return self.x + 10 + int(range_px * (self._value / 255))
 
+    def _knob_rect(self, kx):
+        top = self.y + self._label_reserve() + 1
+        h = max(self.h - self._label_reserve() - 2, 4)
+        kw2 = self._KNOB_W // 2
+        return kx - kw2, top, self._KNOB_W, h
+
+    def _draw_label(self):
+        if not self.label:
+            return
+        t = self.tft
+        max_chars = max(1, self.w // 8)
+        text = self.label[:max_chars]
+        lx = self.x + (self.w - len(text) * 8) // 2
+        t.text(text, lx, self.y + 1, _LABEL_COLOR, BLACK)
+
     def draw(self):
         t = self.tft
-        cy = self.y + self.h // 2
+        cy = self._track_y()
         t.fill_rect(self.x, self.y, self.w, self.h, BLACK)
         t.fill_rect(self.x + 8, cy - 1, self.w - 16, 3, self._TRACK_COLOR)
         kx = self._knob_x()
         kc = self._KNOB_PRESSED if self._touching else self._KNOB_COLOR
-        kw2 = self._KNOB_W // 2
-        t.fill_rect(kx - kw2, self.y + 2, self._KNOB_W, self.h - 4, kc)
+        rx, ry, rw, rh = self._knob_rect(kx)
+        t.fill_rect(rx, ry, rw, rh, kc)
         self._prev_kx = kx
+        self._draw_label()
 
     def _move_knob(self):
         kx = self._knob_x()
         if kx == self._prev_kx:
             return
         t = self.tft
-        cy = self.y + self.h // 2
-        kw2 = self._KNOB_W // 2
+        cy = self._track_y()
         if self._prev_kx is not None:
-            t.fill_rect(self._prev_kx - kw2, self.y + 2, self._KNOB_W, self.h - 4, BLACK)
-            tk_lo = max(self.x + 8, self._prev_kx - kw2)
-            tk_hi = min(self.x + self.w - 12, self._prev_kx + kw2 + 1)
+            ox, oy, ow, oh = self._knob_rect(self._prev_kx)
+            t.fill_rect(ox, oy, ow, oh, BLACK)
+            tk_lo = max(self.x + 8, self._prev_kx - self._KNOB_W // 2)
+            tk_hi = min(self.x + self.w - 12, self._prev_kx + self._KNOB_W // 2 + 1)
             if tk_hi > tk_lo:
                 t.fill_rect(tk_lo, cy - 1, tk_hi - tk_lo, 3, self._TRACK_COLOR)
-        t.fill_rect(kx - kw2, self.y + 2, self._KNOB_W, self.h - 4, self._KNOB_PRESSED)
+        nx, ny, nw, nh = self._knob_rect(kx)
+        t.fill_rect(nx, ny, nw, nh, self._KNOB_PRESSED)
         self._prev_kx = kx
 
     def _set_value(self, tx, ty):
@@ -523,27 +417,3 @@ class PageButton(Widget):
 
     def osc_message(self):
         return None
-
-
-class IPDisplay(Widget):
-    """Displays the ESP32's WiFi IP address. Read-only."""
-
-    def __init__(self, tft, x, y, w, h, osc_addr):
-        super().__init__(tft, x, y, w, h, osc_addr)
-        try:
-            import network as _net
-            wlan = _net.WLAN(_net.STA_IF)
-            self._ip = wlan.ifconfig()[0] if wlan.isconnected() else '---'
-        except Exception:
-            self._ip = '---'
-
-    def draw(self):
-        t = self.tft
-        t.fill_rect(self.x, self.y, self.w, self.h, BLACK)
-        lx = self.x + (self.w - len(self._ip) * 6) // 2
-        ly = self.y + (self.h - 8) // 2
-        t.text(self._ip, lx, ly, GRAY, BLACK)
-
-    def on_touch(self, tx, ty): pass
-    def on_release(self):       return False
-    def osc_message(self):      return None
