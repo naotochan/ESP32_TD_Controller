@@ -450,7 +450,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>ESP32 UI Layout Editor <span className="app-version">v0.3.6</span></h1>
+        <h1>ESP32 UI Layout Editor <span className="app-version">v0.3.7</span></h1>
         <div className="header-actions">
           <ExportButton
             pages={pagesState.value}
@@ -585,7 +585,7 @@ export default function App() {
                         showGrid={showGrid}
                         snapToGrid={snapToGrid}
                         rotationDeg={rotationDeg}
-                        appVersion="0.3.6"
+                        appVersion="0.3.7"
                         showPortLabels
                         pageIdx={idx}
                         scale={BASE_SCALE}
