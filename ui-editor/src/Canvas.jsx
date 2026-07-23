@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 
-/** Default editor pixels per device pixel (100% zoom). */
+/** Default editor pixels per device pixel (fixed page footprint; view zoom is CSS). */
 export const BASE_SCALE = 2
 /** Matches firmware STATUS_H — reserved for IP + version footer. */
 export const STATUS_BAR_H = 14
@@ -13,11 +13,20 @@ const WIDGET_TEMPLATES = {
   PageButton: { w: 60,  h: 30 },
 }
 
+/** Map client coords → device pixels (works with CSS zoom transforms on ancestors). */
+function clientToDevice(clientX, clientY, rect, screenW, screenH) {
+  if (!rect || rect.width <= 0 || rect.height <= 0) return { x: 0, y: 0 }
+  return {
+    x: ((clientX - rect.left) / rect.width) * screenW,
+    y: ((clientY - rect.top) / rect.height) * screenH,
+  }
+}
+
 export default function Canvas({
   widgets, selectedIds, onSelect, onSelectMany,
   onUpdate, onUpdateMany, onAddWidget, onCommitDrag, onGetSnapshot,
   screenW, screenH, showGrid, snapToGrid = true,
-  rotationDeg = 0, appVersion = '0.3.0', showPortLabels = true,
+  rotationDeg = 0, appVersion = '0.3.6', showPortLabels = true,
   pageIdx = 0, scale = BASE_SCALE,
 }) {
   const usableH = screenH - STATUS_BAR_H
@@ -70,18 +79,18 @@ export default function Canvas({
     const widgetType = e.dataTransfer.getData('widgetType')
     if (!widgetType || !WIDGET_TEMPLATES[widgetType]) return
     const rect = canvasRef.current.getBoundingClientRect()
-    const x = Math.round(((e.clientX - rect.left) / scale - WIDGET_TEMPLATES[widgetType].w / 2) / 5) * 5
-    const y = Math.round(((e.clientY - rect.top) / scale - WIDGET_TEMPLATES[widgetType].h / 2) / 5) * 5
+    const { x: cx, y: cy } = clientToDevice(e.clientX, e.clientY, rect, screenW, screenH)
+    const x = Math.round((cx - WIDGET_TEMPLATES[widgetType].w / 2) / 5) * 5
+    const y = Math.round((cy - WIDGET_TEMPLATES[widgetType].h / 2) / 5) * 5
     onAddWidget(widgetType, x, y)
-  }, [onAddWidget, scale])
+  }, [onAddWidget, screenW, screenH])
 
   // --- Widget pointer: start move or resize drag ---
   const handlePointerDown = useCallback((e, widgetId, mode) => {
     e.stopPropagation()
     e.preventDefault()
     const rect = canvasRef.current.getBoundingClientRect()
-    const pointerX = (e.clientX - rect.left) / scale
-    const pointerY = (e.clientY - rect.top) / scale
+    const { x: pointerX, y: pointerY } = clientToDevice(e.clientX, e.clientY, rect, screenW, screenH)
     const additive = e.metaKey || e.ctrlKey
 
     dragSnapshotRef.current = onGetSnapshotRef.current()
@@ -102,7 +111,7 @@ export default function Canvas({
     }
 
     onSelect(widgetId, additive)
-  }, [onSelect, scale])
+  }, [onSelect, screenW, screenH])
 
   // --- Canvas background: just deselect (rubber band handled by container) ---
   const onCanvasPointerDown = useCallback((e) => {
@@ -116,11 +125,12 @@ export default function Canvas({
     if (e.metaKey || e.ctrlKey) return
     const rect = canvasRef.current.getBoundingClientRect()
     // Clamp start point to canvas coordinate space (can start from outside edge)
-    const x = Math.max(0, Math.min(screenW, (e.clientX - rect.left) / scale))
-    const y = Math.max(0, Math.min(screenH, (e.clientY - rect.top) / scale))
+    const { x: rawX, y: rawY } = clientToDevice(e.clientX, e.clientY, rect, screenW, screenH)
+    const x = Math.max(0, Math.min(screenW, rawX))
+    const y = Math.max(0, Math.min(screenH, rawY))
     rubberBandRef.current = { startX: x, startY: y, currentX: x, currentY: y }
     setRubberBandRect({ x, y, w: 0, h: 0 })
-  }, [screenW, screenH, scale])
+  }, [screenW, screenH])
 
   // --- Stable global handlers (no/minimal deps, read latest via refs) ---
   const handlePointerMove = useCallback((e) => {
@@ -130,8 +140,7 @@ export default function Canvas({
 
     if (dragState.current) {
       const state = dragState.current
-      const pointerX = (e.clientX - rect.left) / scale
-      const pointerY = (e.clientY - rect.top) / scale
+      const { x: pointerX, y: pointerY } = clientToDevice(e.clientX, e.clientY, rect, screenW, screenH)
       const dx = Math.round(pointerX - state.startX)
       const dy = Math.round(pointerY - state.startY)
 
@@ -231,8 +240,9 @@ export default function Canvas({
     }
 
     if (rubberBandRef.current) {
-      const cx = Math.max(0, Math.min(screenW, (e.clientX - rect.left) / scale))
-      const cy = Math.max(0, Math.min(screenH, (e.clientY - rect.top) / scale))
+      const { x: rawX, y: rawY } = clientToDevice(e.clientX, e.clientY, rect, screenW, screenH)
+      const cx = Math.max(0, Math.min(screenW, rawX))
+      const cy = Math.max(0, Math.min(screenH, rawY))
       rubberBandRef.current.currentX = cx
       rubberBandRef.current.currentY = cy
       const { startX, startY } = rubberBandRef.current
@@ -243,7 +253,7 @@ export default function Canvas({
         h: Math.abs(cy - startY),
       })
     }
-  }, [onUpdate, screenW, screenH, usableH, snapToGrid, scale])
+  }, [onUpdate, screenW, screenH, usableH, snapToGrid])
 
   const handlePointerUp = useCallback(() => {
     if (dragState.current !== null && dragSnapshotRef.current !== null) {

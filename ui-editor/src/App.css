@@ -237,6 +237,19 @@
 }
 
 /* === Pages (all visible, label under each) === */
+.pages-zoom-spacer {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: flex-start;
+}
+
+.pages-zoom-content {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+
 .pages-row {
   position: relative;
   display: flex;
@@ -244,9 +257,10 @@
   align-items: flex-start;
   justify-content: center;
   gap: 28px 36px;
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   min-height: 100%;
-  flex: 1;
+  box-sizing: border-box;
   padding: 8px 12px 24px;
   cursor: grab;
 }

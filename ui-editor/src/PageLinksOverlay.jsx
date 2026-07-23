@@ -61,12 +61,14 @@ function curvePath(x1, y1, x2, y2) {
 /**
  * SVG overlay: PageButton → destination page-slot curves.
  * Must be a child of `.pages-row` (position: relative).
+ * `zoom` compensates for CSS transform:scale on an ancestor.
  */
 export default function PageLinksOverlay({
   containerRef,
   pages,
   selectedIds,
   currentPage,
+  zoom = 1,
   revision = 0,
 }) {
   const [paths, setPaths] = useState([])
@@ -76,6 +78,7 @@ export default function PageLinksOverlay({
     const root = containerRef.current
     if (!root) return
 
+    const inv = zoom > 0 ? zoom : 1
     const rootRect = root.getBoundingClientRect()
     setSize({ w: root.scrollWidth, h: root.scrollHeight })
 
@@ -83,7 +86,15 @@ export default function PageLinksOverlay({
     const slotMap = new Map()
     slotEls.forEach((el) => {
       const idx = Number(el.getAttribute('data-page-slot'))
-      slotMap.set(idx, el.getBoundingClientRect())
+      const r = el.getBoundingClientRect()
+      slotMap.set(idx, {
+        left: (r.left - rootRect.left) / inv + root.scrollLeft,
+        top: (r.top - rootRect.top) / inv + root.scrollTop,
+        right: (r.right - rootRect.left) / inv + root.scrollLeft,
+        bottom: (r.bottom - rootRect.top) / inv + root.scrollTop,
+        width: r.width / inv,
+        height: r.height / inv,
+      })
     })
 
     const pageCount = pages.length
@@ -100,8 +111,8 @@ export default function PageLinksOverlay({
         )
         if (!btn) return
         const br = btn.getBoundingClientRect()
-        const x1 = br.left + br.width / 2 - rootRect.left + root.scrollLeft
-        const y1 = br.top + br.height / 2 - rootRect.top + root.scrollTop
+        const x1 = (br.left + br.width / 2 - rootRect.left) / inv + root.scrollLeft
+        const y1 = (br.top + br.height / 2 - rootRect.top) / inv + root.scrollTop
 
         const selected = selectedIds.includes(w.id)
         const emphasized =
@@ -123,17 +134,9 @@ export default function PageLinksOverlay({
           return
         }
 
-        const slotRect = slotMap.get(resolved.target)
-        if (!slotRect) return
+        const localSlot = slotMap.get(resolved.target)
+        if (!localSlot) return
 
-        const localSlot = {
-          left: slotRect.left - rootRect.left + root.scrollLeft,
-          top: slotRect.top - rootRect.top + root.scrollTop,
-          right: slotRect.right - rootRect.left + root.scrollLeft,
-          bottom: slotRect.bottom - rootRect.top + root.scrollTop,
-          width: slotRect.width,
-          height: slotRect.height,
-        }
         const end = edgePoint(localSlot, x1, y1)
         next.push({
           id: `${pageIdx}-${w.id}`,
@@ -146,7 +149,7 @@ export default function PageLinksOverlay({
     })
 
     setPaths(next)
-  }, [containerRef, pages, selectedIds, currentPage])
+  }, [containerRef, pages, selectedIds, currentPage, zoom])
 
   useLayoutEffect(() => {
     measure()
