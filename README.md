@@ -223,7 +223,7 @@ flash 全消去 → MicroPython 焼き直し → `deploy.sh` で全部入れ直�
 ## CYD ハードウェアの注意点
 
 - **display rotation**: `layout.json` の `rotation` は **0 / 90 / 180 / 270**（**反時計回り / CCW**）。ファームは MADCTL index に変換（90°CCW→index 3）。偶数 index → 240×320、奇数 → 320×240
-- **Web エディタ**: 回転プルダウンは CCW。キャンバス枠に **USB** / **microSD**（0°: USB=下、90°CCW: USB=右・microSD=左）
+- **Web エディタ**: 回転プルダウンは CCW。キャンバス枠に **USB**（0°: USB=下、90°CCW: USB=右）
 - **タッチ X 軸反転**: XPT2046 の生 X は物理的に左右逆なので `xpt2046.py` 内で rotation ごとに補正済み
 - 旧 `orientation: portrait|landscape` + `rotation: 0|1` も読み込み互換あり
 

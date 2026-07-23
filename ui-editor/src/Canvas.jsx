@@ -32,17 +32,17 @@ export default function Canvas({
   const usableH = screenH - STATUS_BAR_H
 
   /**
-   * Physical USB / microSD edges relative to screen content.
+   * Physical USB edge relative to screen content.
    * Degrees are counter-clockwise (左回転) from 0°.
-   * 0° portrait: USB=bottom (cable down). 90° CCW landscape: USB=right, microSD=left.
+   * 0° portrait: USB=bottom (cable down). 90° CCW landscape: USB=right.
    */
   const portEdges = (() => {
     const deg = ((rotationDeg % 360) + 360) % 360
     const map = {
-      0:   { usb: 'bottom', sd: 'top' },
-      90:  { usb: 'right',  sd: 'left' },
-      180: { usb: 'top',    sd: 'bottom' },
-      270: { usb: 'left',   sd: 'right' },
+      0:   { usb: 'bottom' },
+      90:  { usb: 'right' },
+      180: { usb: 'top' },
+      270: { usb: 'left' },
     }
     return map[deg] || map[0]
   })()
@@ -301,10 +301,7 @@ export default function Canvas({
     >
       <div className="canvas-board-frame">
         {showPortLabels && (
-          <>
-            <div className={`canvas-port-label edge-${portEdges.usb} port-usb`}>USB</div>
-            <div className={`canvas-port-label edge-${portEdges.sd} port-sd`}>microSD</div>
-          </>
+          <div className={`canvas-port-label edge-${portEdges.usb} port-usb`}>USB</div>
         )}
         <div
           ref={canvasRef}

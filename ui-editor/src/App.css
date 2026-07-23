@@ -639,12 +639,6 @@
   border: 1px solid #3b6ea5;
 }
 
-.canvas-port-label.port-sd {
-  background: #3a2e1e;
-  color: #e6c07b;
-  border: 1px solid #8a6d3b;
-}
-
 .canvas-port-label.edge-top {
   top: 4px;
   left: 50%;

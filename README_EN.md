@@ -223,7 +223,7 @@ Erase flash → re-flash MicroPython → redeploy everything:
 ## CYD Hardware Notes
 
 - **Display rotation**: `layout.json` `rotation` is **0 / 90 / 180 / 270** (**counter-clockwise / CCW**). Firmware maps to MADCTL index (90°CCW→index 3). Even index → 240×320, odd → 320×240
-- **Web editor**: rotation dropdown is CCW. Canvas shows **USB** / **microSD** (0°: USB=bottom; 90°CCW: USB=right, microSD=left)
+- **Web editor**: rotation dropdown is CCW. Canvas shows **USB** (0°: USB=bottom; 90°CCW: USB=right)
 - **Touch X mirror**: XPT2046 raw X is physically mirrored; `xpt2046.py` corrects per rotation
 - Legacy `orientation: portrait|landscape` + `rotation: 0|1` still loads
 
