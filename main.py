@@ -1,5 +1,5 @@
 """ESP32 TD Controller - main entry point."""
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 import time
 from machine import SPI, Pin
@@ -55,17 +55,21 @@ def _load_calib(env):
     return calib
 
 
+# MicroPython: cannot attach attrs to function objects — use a plain dict.
+_wifi_cache = {'at': None, 'ok': False}
+
+
 def _wifi_connected():
     """Cached WLAN check (refreshed every ~2s)."""
     now = time.ticks_ms()
-    if not hasattr(_wifi_connected, '_at') or time.ticks_diff(now, _wifi_connected._at) > 2000:
-        _wifi_connected._at = now
+    if _wifi_cache['at'] is None or time.ticks_diff(now, _wifi_cache['at']) > 2000:
+        _wifi_cache['at'] = now
         try:
             import network
-            _wifi_connected._ok = network.WLAN(network.STA_IF).isconnected()
+            _wifi_cache['ok'] = network.WLAN(network.STA_IF).isconnected()
         except Exception:
-            _wifi_connected._ok = False
-    return _wifi_connected._ok
+            _wifi_cache['ok'] = False
+    return _wifi_cache['ok']
 
 
 def _show_error(tft, lines, fatal=True):
@@ -176,14 +180,37 @@ for page in all_pages:
             _addr_index.setdefault(addr, []).append(w)
 
 
+def _status_ip():
+    """Current STA IP, or a short offline marker."""
+    try:
+        import network
+        wlan = network.WLAN(network.STA_IF)
+        if wlan.isconnected():
+            return wlan.ifconfig()[0]
+    except Exception:
+        pass
+    return "no-wifi"
+
+
+def _draw_status():
+    """Always-on footer: IP (left) + version (right)."""
+    bg = color565(10, 10, 20)
+    fg = color565(140, 140, 160)
+    y = SCREEN_H - 12
+    ip = _status_ip()
+    ver = "v" + __version__
+    # Clear footer strip so redraws don't ghost
+    tft.fill_rect(0, y - 2, SCREEN_W, 14, bg)
+    tft.text(ip, 4, y, fg, bg)
+    vx = max(0, SCREEN_W - len(ver) * 8 - 4)
+    tft.text(ver, vx, y, fg, bg)
+
+
 def draw_page(page_idx):
     tft.fill(color565(10, 10, 20))
     for w in all_pages[page_idx]:
         w.draw()
-    # Version badge (bottom-right)
-    ver = "v" + __version__
-    vx = max(0, SCREEN_W - len(ver) * 8 - 4)
-    tft.text(ver, vx, SCREEN_H - 12, color565(80, 80, 100), color565(10, 10, 20))
+    _draw_status()
 
 
 def _apply_inbound(addr, args):

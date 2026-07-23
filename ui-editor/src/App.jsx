@@ -251,7 +251,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>ESP32 UI Layout Editor <span className="app-version">v0.2.0</span></h1>
+        <h1>ESP32 UI Layout Editor <span className="app-version">v0.2.1</span></h1>
         <div className="header-actions">
           <ExportButton
             pages={pagesState.value}
