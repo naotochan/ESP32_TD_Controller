@@ -189,48 +189,6 @@ ESP32 の **Page とは別**。`button/1`〜`button/4` の立ち上がりで `sc
 
 ---
 
-## ファイル構成
-
-```
-.
-├── deploy.sh             # 全ファイルをまとめて ESP32 に転送 + 再起動
-├── deploy-layout.sh      # layout.json と main.py だけ転送
-├── start.sh              # エディタ + deploy server を同時起動
-├── server.py             # ローカル deploy server（エディタからの POST を受ける）
-├── pyproject.toml        # Python 依存 (esptool, mpremote)
-├── boot.py               # 起動時の WiFi 接続
-├── main.py               # メインループ: タッチ → ウィジェット処理 → OSC
-├── ui.py                 # Widget クラス (Button / Toggle / Slider / …)
-├── widgets.py            # フォールバック用の初期レイアウト
-├── layout.json.example   # layout.json のサンプル（layout.json は git 管理外）
-├── calib.json.example    # タッチキャリブのサンプル（calib.json は git 管理外）
-├── calibrate_touch.py    # タッチキャリブユーティリティ
-├── lib/
-│   ├── ili9341.py        # TFT ディスプレイドライバ
-│   ├── xpt2046.py        # タッチパネルドライバ
-│   ├── osc.py            # OSC 1.0 UDP 送受信
-│   └── dotenv.py         # .env パーサ（MicroPython 用）
-├── ui-editor/            # ブラウザのレイアウトエディタ (Vite + React)
-├── micropython_esp32.bin # ESP32 用 MicroPython ファームウェア（v1.25.0）
-├── LICENSE               # MIT
-└── .env                  # WiFi・OSC 設定（git 管理外、各自作成）
-```
-
----
-
-## ピン配置 (ESP32-2432S028R デュアルUSBバリアント)
-
-| 用途 | ピン |
-|---|---|
-| TFT MOSI / MISO / SCK / CS / DC / BL | 13 / 12 / 14 / 15 / 2 / 21 |
-| Touch MOSI / MISO / SCK / CS / IRQ | 32 / 39 / 25 / 33 / 36 |
-| SD MOSI / MISO / SCK / CS | 23 / 19 / 18 / 5 |
-| RGB LED (active LOW) | R=4, G=16, B=17 |
-
-裏面シルクの参考写真: `back_silkscreen_spec.jpg`
-
----
-
 ## トラブルシューティング
 
 ### 画面に ERROR が出る / 真っ黒のまま
