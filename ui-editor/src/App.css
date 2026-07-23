@@ -358,40 +358,46 @@
   color: #ff9a9a;
 }
 
-/* Big discoverable "add page" tile next to page canvases */
-.page-slot-add {
-  opacity: 1;
-  min-width: 120px;
-  min-height: 160px;
-  justify-content: center;
-  gap: 8px;
-  border: 2px dashed rgba(74, 255, 138, 0.45);
-  background: rgba(74, 255, 138, 0.06);
-  color: #4aff8a;
-  font: inherit;
-  cursor: pointer;
-}
-
-.page-slot-add:hover {
-  border-color: rgba(74, 255, 138, 0.85);
-  background: rgba(74, 255, 138, 0.12);
-}
-
-.page-slot-add-plus {
-  font-size: 42px;
-  font-weight: 300;
+/* Floating circular "add page" — fixed bottom-right of canvas shell */
+.page-add-fab {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  width: 52px;
+  height: 52px;
+  border: none;
+  border-radius: 50%;
+  background: #4aff8a;
+  color: #0a1a10;
+  font-size: 28px;
+  font-weight: 400;
   line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(74, 255, 138, 0.35);
 }
 
-.page-slot-add-label {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+.page-add-fab:hover {
+  background: #6aff9e;
+  transform: scale(1.06);
+}
+
+.page-add-fab:active {
+  transform: scale(0.96);
 }
 
 .app-body {
   display: flex;
   flex: 1;
+  overflow: hidden;
+}
+
+.canvas-area-shell {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
@@ -497,6 +503,18 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary, #e8e8f0);
+}
+
+.canvas-zoom-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+
+.canvas-zoom-pct {
+  min-width: 44px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
 }
 
 .canvas-toolbar-sep {

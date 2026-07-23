@@ -18,7 +18,7 @@ Touch interactions (buttons, toggles, sliders, color pickers, page switching) ar
                                                            └─────────────┘
 ```
 
-**Version:** 0.3.3
+**Version:** 0.3.4
 
 ---
 

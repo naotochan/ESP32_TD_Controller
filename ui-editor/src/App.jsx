@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import './App.css'
-import Canvas, { STATUS_BAR_H } from './Canvas'
+import Canvas, { STATUS_BAR_H, BASE_SCALE } from './Canvas'
 import WidgetPanel from './WidgetPanel'
 import Properties from './Properties'
 import ExportButton from './ExportButton'
@@ -25,6 +25,27 @@ export function normalizeRotationDeg(data) {
 }
 
 const ROTATION_STORAGE_KEY = 'esp32-td-rotation-deg'
+const ZOOM_STORAGE_KEY = 'esp32-td-editor-zoom'
+const ZOOM_MIN = 0.5
+const ZOOM_MAX = 2
+const ZOOM_STEP = 0.1
+
+function clampZoom(z) {
+  const n = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) * 10) / 10
+  return n
+}
+
+function loadStoredZoom() {
+  try {
+    const raw = localStorage.getItem(ZOOM_STORAGE_KEY)
+    if (raw == null) return 1
+    const n = Number(raw)
+    if (!Number.isFinite(n)) return 1
+    return clampZoom(n)
+  } catch {
+    return 1
+  }
+}
 
 function loadStoredRotationDeg() {
   try {
@@ -63,12 +84,18 @@ export default function App() {
   const [rotationDeg, setRotationDeg] = useState(loadStoredRotationDeg)
   const [showGrid, setShowGrid] = useState(true)
   const [snapToGrid, setSnapToGrid] = useState(true)
+  const [zoom, setZoom] = useState(loadStoredZoom)
 
   const { w: screenW, h: screenH } = screenSizeForRotation(rotationDeg)
+  const viewScale = BASE_SCALE * zoom
 
   useEffect(() => {
     storeRotationDeg(rotationDeg)
   }, [rotationDeg])
+
+  useEffect(() => {
+    try { localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom)) } catch { /* ignore */ }
+  }, [zoom])
 
   // Stable refs so callbacks always read the latest values without deps
   const currentPageRef = useRef(currentPage)
@@ -78,6 +105,43 @@ export default function App() {
   const pagesRowRef = useRef(null)
   const canvasAreaRef = useRef(null)
   const panRef = useRef(null)
+  const zoomRef = useRef(zoom)
+  zoomRef.current = zoom
+
+  const applyZoom = useCallback((nextZoom, anchor) => {
+    const el = canvasAreaRef.current
+    const oldZoom = zoomRef.current
+    const newZoom = clampZoom(nextZoom)
+    if (newZoom === oldZoom) return
+    if (el && anchor) {
+      const rect = el.getBoundingClientRect()
+      const mx = anchor.clientX - rect.left
+      const my = anchor.clientY - rect.top
+      const ratio = newZoom / oldZoom
+      setZoom(newZoom)
+      requestAnimationFrame(() => {
+        el.scrollLeft = (el.scrollLeft + mx) * ratio - mx
+        el.scrollTop = (el.scrollTop + my) * ratio - my
+      })
+    } else {
+      setZoom(newZoom)
+    }
+  }, [])
+
+  const onCanvasAreaWheel = useCallback((e) => {
+    if (!(e.ctrlKey || e.metaKey)) return
+    e.preventDefault()
+    const step = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP
+    applyZoom(zoomRef.current + step, { clientX: e.clientX, clientY: e.clientY })
+  }, [applyZoom])
+
+  useEffect(() => {
+    const el = canvasAreaRef.current
+    if (!el) return undefined
+    const onWheel = (e) => onCanvasAreaWheel(e)
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [onCanvasAreaWheel])
 
   const onCanvasAreaPointerDown = useCallback((e) => {
     if (e.button !== 0) return
@@ -366,7 +430,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>ESP32 UI Layout Editor <span className="app-version">v0.3.3</span></h1>
+        <h1>ESP32 UI Layout Editor <span className="app-version">v0.3.4</span></h1>
         <div className="header-actions">
           <ExportButton
             pages={pagesState.value}
@@ -383,6 +447,7 @@ export default function App() {
 
       <div className="app-body">
         <WidgetPanel onDrop={onAddWidget} />
+        <div className="canvas-area-shell">
         <div
           className="canvas-area"
           ref={canvasAreaRef}
@@ -430,6 +495,29 @@ export default function App() {
               onClick={() => setSnapToGrid(prev => !prev)}
               title="スナップ"
             >Snap</button>
+            <div className="canvas-toolbar-sep" />
+            <div className="canvas-zoom-group" title="ズーム (Ctrl/⌘ + ホイール)">
+              <button
+                type="button"
+                className="canvas-tool-btn"
+                onClick={() => applyZoom(zoom - ZOOM_STEP)}
+                disabled={zoom <= ZOOM_MIN}
+                title="縮小"
+              >−</button>
+              <button
+                type="button"
+                className="canvas-tool-btn canvas-zoom-pct"
+                onClick={() => applyZoom(1)}
+                title="100% に戻す"
+              >{Math.round(zoom * 100)}%</button>
+              <button
+                type="button"
+                className="canvas-tool-btn"
+                onClick={() => applyZoom(zoom + ZOOM_STEP)}
+                disabled={zoom >= ZOOM_MAX}
+                title="拡大"
+              >+</button>
+            </div>
           </div>
 
           <div className="pages-row" ref={pagesRowRef}>
@@ -438,7 +526,7 @@ export default function App() {
               pages={pagesState.value}
               selectedIds={selectedIds}
               currentPage={currentPage}
-              revision={`${rotationDeg}-${screenW}x${screenH}-${pageCount}`}
+              revision={`${rotationDeg}-${screenW}x${screenH}-${pageCount}-${zoom}`}
             />
             {pagesState.value.map((pageWidgets, idx) => {
               const active = idx === currentPage
@@ -464,9 +552,10 @@ export default function App() {
                     showGrid={showGrid}
                     snapToGrid={snapToGrid}
                     rotationDeg={rotationDeg}
-                    appVersion="0.3.3"
+                    appVersion="0.3.4"
                     showPortLabels={idx === 0}
                     pageIdx={idx}
+                    scale={viewScale}
                   />
                   {active && pageCount > 1 && (
                     <button
@@ -489,16 +578,17 @@ export default function App() {
                 </div>
               )
             })}
-            <button
-              type="button"
-              className="page-slot page-slot-add"
-              onClick={addPage}
-              title="ページを追加"
-            >
-              <span className="page-slot-add-plus">+</span>
-              <span className="page-slot-add-label">ページを追加</span>
-            </button>
           </div>
+        </div>
+        <button
+          type="button"
+          className="page-add-fab"
+          onClick={addPage}
+          title="ページを追加"
+          aria-label="ページを追加"
+        >
+          +
+        </button>
         </div>
         <div className="right-sidebar">
           <Properties

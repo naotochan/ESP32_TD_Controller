@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 
-const SCALE = 2
+/** Default editor pixels per device pixel (100% zoom). */
+export const BASE_SCALE = 2
 /** Matches firmware STATUS_H — reserved for IP + version footer. */
 export const STATUS_BAR_H = 14
 
@@ -17,7 +18,7 @@ export default function Canvas({
   onUpdate, onUpdateMany, onAddWidget, onCommitDrag, onGetSnapshot,
   screenW, screenH, showGrid, snapToGrid = true,
   rotationDeg = 0, appVersion = '0.3.0', showPortLabels = true,
-  pageIdx = 0,
+  pageIdx = 0, scale = BASE_SCALE,
 }) {
   const usableH = screenH - STATUS_BAR_H
 
@@ -69,18 +70,18 @@ export default function Canvas({
     const widgetType = e.dataTransfer.getData('widgetType')
     if (!widgetType || !WIDGET_TEMPLATES[widgetType]) return
     const rect = canvasRef.current.getBoundingClientRect()
-    const x = Math.round(((e.clientX - rect.left) / SCALE - WIDGET_TEMPLATES[widgetType].w / 2) / 5) * 5
-    const y = Math.round(((e.clientY - rect.top) / SCALE - WIDGET_TEMPLATES[widgetType].h / 2) / 5) * 5
+    const x = Math.round(((e.clientX - rect.left) / scale - WIDGET_TEMPLATES[widgetType].w / 2) / 5) * 5
+    const y = Math.round(((e.clientY - rect.top) / scale - WIDGET_TEMPLATES[widgetType].h / 2) / 5) * 5
     onAddWidget(widgetType, x, y)
-  }, [onAddWidget])
+  }, [onAddWidget, scale])
 
   // --- Widget pointer: start move or resize drag ---
   const handlePointerDown = useCallback((e, widgetId, mode) => {
     e.stopPropagation()
     e.preventDefault()
     const rect = canvasRef.current.getBoundingClientRect()
-    const pointerX = (e.clientX - rect.left) / SCALE
-    const pointerY = (e.clientY - rect.top) / SCALE
+    const pointerX = (e.clientX - rect.left) / scale
+    const pointerY = (e.clientY - rect.top) / scale
     const additive = e.metaKey || e.ctrlKey
 
     dragSnapshotRef.current = onGetSnapshotRef.current()
@@ -101,7 +102,7 @@ export default function Canvas({
     }
 
     onSelect(widgetId, additive)
-  }, [onSelect])
+  }, [onSelect, scale])
 
   // --- Canvas background: just deselect (rubber band handled by container) ---
   const onCanvasPointerDown = useCallback((e) => {
@@ -115,11 +116,11 @@ export default function Canvas({
     if (e.metaKey || e.ctrlKey) return
     const rect = canvasRef.current.getBoundingClientRect()
     // Clamp start point to canvas coordinate space (can start from outside edge)
-    const x = Math.max(0, Math.min(screenW, (e.clientX - rect.left) / SCALE))
-    const y = Math.max(0, Math.min(screenH, (e.clientY - rect.top) / SCALE))
+    const x = Math.max(0, Math.min(screenW, (e.clientX - rect.left) / scale))
+    const y = Math.max(0, Math.min(screenH, (e.clientY - rect.top) / scale))
     rubberBandRef.current = { startX: x, startY: y, currentX: x, currentY: y }
     setRubberBandRect({ x, y, w: 0, h: 0 })
-  }, [screenW, screenH])
+  }, [screenW, screenH, scale])
 
   // --- Stable global handlers (no/minimal deps, read latest via refs) ---
   const handlePointerMove = useCallback((e) => {
@@ -129,8 +130,8 @@ export default function Canvas({
 
     if (dragState.current) {
       const state = dragState.current
-      const pointerX = (e.clientX - rect.left) / SCALE
-      const pointerY = (e.clientY - rect.top) / SCALE
+      const pointerX = (e.clientX - rect.left) / scale
+      const pointerY = (e.clientY - rect.top) / scale
       const dx = Math.round(pointerX - state.startX)
       const dy = Math.round(pointerY - state.startY)
 
@@ -230,8 +231,8 @@ export default function Canvas({
     }
 
     if (rubberBandRef.current) {
-      const cx = Math.max(0, Math.min(screenW, (e.clientX - rect.left) / SCALE))
-      const cy = Math.max(0, Math.min(screenH, (e.clientY - rect.top) / SCALE))
+      const cx = Math.max(0, Math.min(screenW, (e.clientX - rect.left) / scale))
+      const cy = Math.max(0, Math.min(screenH, (e.clientY - rect.top) / scale))
       rubberBandRef.current.currentX = cx
       rubberBandRef.current.currentY = cy
       const { startX, startY } = rubberBandRef.current
@@ -242,7 +243,7 @@ export default function Canvas({
         h: Math.abs(cy - startY),
       })
     }
-  }, [onUpdate, screenW, screenH, usableH, snapToGrid])
+  }, [onUpdate, screenW, screenH, usableH, snapToGrid, scale])
 
   const handlePointerUp = useCallback(() => {
     if (dragState.current !== null && dragSnapshotRef.current !== null) {
@@ -298,7 +299,7 @@ export default function Canvas({
         <div
           ref={canvasRef}
           className="canvas"
-          style={{ width: screenW * SCALE, height: screenH * SCALE }}
+          style={{ width: screenW * scale, height: screenH * scale }}
           onPointerDown={onCanvasPointerDown}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
@@ -306,16 +307,16 @@ export default function Canvas({
         {/* Grid dots */}
         {showGrid && (
           <svg
-            width={screenW * SCALE}
-            height={screenH * SCALE}
+            width={screenW * scale}
+            height={screenH * scale}
             style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }}
           >
             {Array.from({ length: screenW / 10 }).map((_, gx) =>
               Array.from({ length: screenH / 10 }).map((_, gy) => (
                 <circle
                   key={`${gx}-${gy}`}
-                  cx={gx * 10 * SCALE + 1}
-                  cy={gy * 10 * SCALE + 1}
+                  cx={gx * 10 * scale + 1}
+                  cy={gy * 10 * scale + 1}
                   r={1.2}
                   fill="#4a4a7e"
                 />
@@ -330,7 +331,7 @@ export default function Canvas({
             widget={w}
             isSelected={selectedIds.includes(w.id)}
             onPointerDown={handlePointerDown}
-            scale={SCALE}
+            scale={scale}
             pageIdx={pageIdx}
           />
         ))}
@@ -341,9 +342,9 @@ export default function Canvas({
           style={{
             position: 'absolute',
             left: 0,
-            top: (screenH - STATUS_BAR_H) * SCALE,
-            width: screenW * SCALE,
-            height: STATUS_BAR_H * SCALE,
+            top: (screenH - STATUS_BAR_H) * scale,
+            width: screenW * scale,
+            height: STATUS_BAR_H * scale,
             pointerEvents: 'none',
           }}
         >
@@ -356,18 +357,18 @@ export default function Canvas({
           <div
             className="rubber-band"
             style={{
-              left:   rubberBandRect.x * SCALE,
-              top:    rubberBandRect.y * SCALE,
-              width:  rubberBandRect.w * SCALE,
-              height: rubberBandRect.h * SCALE,
+              left:   rubberBandRect.x * scale,
+              top:    rubberBandRect.y * scale,
+              width:  rubberBandRect.w * scale,
+              height: rubberBandRect.h * scale,
             }}
           />
         )}
 
         <div className="canvas-label canvas-label-top" style={{ left: 0, top: -18 }}>0</div>
-        <div className="canvas-label canvas-label-top" style={{ left: screenW * SCALE, top: -18 }}>{screenW}</div>
+        <div className="canvas-label canvas-label-top" style={{ left: screenW * scale, top: -18 }}>{screenW}</div>
         <div className="canvas-label canvas-label-left" style={{ left: -36, top: 0 }}>0</div>
-        <div className="canvas-label canvas-label-left" style={{ left: -36, top: screenH * SCALE }}>{screenH}</div>
+        <div className="canvas-label canvas-label-left" style={{ left: -36, top: screenH * scale }}>{screenH}</div>
       </div>
       </div>
     </div>
