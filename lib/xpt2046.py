@@ -18,7 +18,7 @@ class XPT2046:
         self.y_min, self.y_max = y_min, y_max
         self.screen_w = screen_w
         self.screen_h = screen_h
-        self.rotation = rotation
+        self.rotation = rotation % 4
 
         self.cs.init(self.cs.OUT, value=1)
         if irq:
@@ -50,28 +50,42 @@ class XPT2046:
         return x, y
 
     def get_pos(self):
-        """Return (screen_x, screen_y) mapped to display pixels, or None."""
+        """Return (screen_x, screen_y) mapped to display pixels, or None.
+
+        rotation matches ILI9341 set_rotation index (0..3 = 0/90/180/270°).
+        CYD raw X is physically mirrored relative to rotation 0.
+        """
         raw = self.get_raw()
         if raw is None:
             return None
         rx, ry = raw
 
-        # Rotation 0 (portrait 240×320): raw X→screen X (mirrored), raw Y→screen Y
-        # Rotation 1 (landscape 320×240): raw Y→screen X, raw X→screen Y
-        if self.rotation == 0:
-            sx = int((rx - self.x_min) * 239 / (self.x_max - self.x_min))
-            sy = int((ry - self.y_min) * 319 / (self.y_max - self.y_min))
-            sx = 239 - max(0, min(239, sx))
-            sy = max(0, min(319, sy))
-        elif self.rotation == 1:
-            sx = int((ry - self.y_min) * 319 / (self.y_max - self.y_min))
-            sy = int((rx - self.x_min) * 239 / (self.x_max - self.x_min))
-            sx = max(0, min(319, sx))
-            sy = max(0, min(239, sy))
-        else:
-            sx = int((rx - self.x_min) * (self.screen_w - 1) / (self.x_max - self.x_min))
-            sy = int((ry - self.y_min) * (self.screen_h - 1) / (self.y_max - self.y_min))
-            sx = max(0, min(self.screen_w - 1, sx))
-            sy = max(0, min(self.screen_h - 1, sy))
+        dx = self.x_max - self.x_min
+        dy = self.y_max - self.y_min
+        if dx == 0 or dy == 0:
+            return None
+        nx = (rx - self.x_min) / dx
+        ny = (ry - self.y_min) / dy
+        if nx < 0: nx = 0.0
+        elif nx > 1: nx = 1.0
+        if ny < 0: ny = 0.0
+        elif ny > 1: ny = 1.0
+
+        w1 = self.screen_w - 1
+        h1 = self.screen_h - 1
+        r = self.rotation % 4
+
+        if r == 0:      # 0°   portrait  — mirror X
+            sx = int((1.0 - nx) * w1)
+            sy = int(ny * h1)
+        elif r == 1:    # 90°  landscape
+            sx = int(ny * w1)
+            sy = int(nx * h1)
+        elif r == 2:    # 180° portrait
+            sx = int(nx * w1)
+            sy = int((1.0 - ny) * h1)
+        else:           # 270° landscape
+            sx = int((1.0 - ny) * w1)
+            sy = int((1.0 - nx) * h1)
 
         return sx, sy

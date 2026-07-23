@@ -18,7 +18,7 @@ Touch interactions (buttons, toggles, sliders, color pickers, page switching) ar
                                                            └─────────────┘
 ```
 
-**Version:** 0.2.1
+**Version:** 0.3.4
 
 ---
 
@@ -156,7 +156,6 @@ Drag-and-drop widgets in the browser, then hit **Deploy** — `layout.json` is t
 | Toggle | `/esp32/toggle/1` | float | `1.0` ON / `0.0` OFF (latching) |
 | Slider | `/esp32/slider/1` | float | `0.0` — `255.0` continuous (vertical) |
 | HSlider | `/esp32/hslider/1` | float | `0.0` — `255.0` continuous (horizontal) |
-| HSVPicker | `/esp32/color/1` | int×3 | `r, g, b` (each 0—255) |
 | PageButton | — | — | Page switch (no OSC sent) |
 
 Addresses can be freely changed in the editor.
@@ -240,8 +239,10 @@ Erase flash → re-flash MicroPython → redeploy everything:
 
 ## CYD Hardware Notes
 
-- **Display rotation**: `rotation=0` is portrait (240×320). `ili9341.py` `set_rotation()` sets `width=240, height=320` when `r % 2 == 0` (opposite of landscape)
-- **Touch X-axis inversion**: The XPT2046 X coordinate is physically mirrored; `xpt2046.py` already applies `sx = screen_w - 1 - sx`
+- **Display rotation**: `layout.json` `rotation` is **0 / 90 / 180 / 270** (**counter-clockwise / CCW**). Firmware maps to MADCTL index (90°CCW→index 3). Even index → 240×320, odd → 320×240
+- **Web editor**: rotation dropdown is CCW. Canvas shows **USB** / **microSD** (0°: USB=bottom; 90°CCW: USB=right, microSD=left)
+- **Touch X mirror**: XPT2046 raw X is physically mirrored; `xpt2046.py` corrects per rotation
+- Legacy `orientation: portrait|landscape` + `rotation: 0|1` still loads
 
 ---
 

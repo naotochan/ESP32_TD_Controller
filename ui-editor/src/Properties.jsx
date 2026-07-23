@@ -1,11 +1,3 @@
-function rgbToHex([r, g, b]) {
-  return '#' + [r, g, b].map(v => Math.min(255, Math.max(0, v)).toString(16).padStart(2, '0')).join('')
-}
-
-function hexToRgb(hex) {
-  return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16))
-}
-
 function AlignIcon({ type }) {
   const s = { display: 'block', pointerEvents: 'none' }
   if (type === 'left') return (
@@ -274,37 +266,6 @@ export default function Properties({ widget, selectedIds, widgets, pageCount = 1
               className={`nav-mode-btn ${widget.default ? 'active' : ''}`}
               onClick={() => onUpdate(widget.id, { default: 1 })}
             >ON</button>
-          </div>
-        </div>
-      )}
-
-      {widget.type === 'HSVPicker' && (
-        <div className="prop-section">
-          <label>初期値 (R, G, B)</label>
-          <div className="rgb-defaults">
-            {['R', 'G', 'B'].map((ch, i) => (
-              <input
-                key={ch}
-                type="number"
-                min={0}
-                max={255}
-                value={widget.default?.[i] ?? 127}
-                onChange={(e) => {
-                  const vals = [...(widget.default || [127, 127, 127])]
-                  vals[i] = Math.min(255, Math.max(0, parseInt(e.target.value, 10) || 0))
-                  onUpdate(widget.id, { default: vals })
-                }}
-              />
-            ))}
-          </div>
-          <div className="color-picker-row">
-            <label>カラーピッカー</label>
-            <input
-              type="color"
-              className="color-picker-input"
-              value={rgbToHex(widget.default || [127, 127, 127])}
-              onChange={(e) => onUpdate(widget.id, { default: hexToRgb(e.target.value) })}
-            />
           </div>
         </div>
       )}

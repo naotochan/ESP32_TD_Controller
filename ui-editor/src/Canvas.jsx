@@ -1,14 +1,15 @@
 import { useState, useCallback, useRef } from 'react'
 
-const SCALE = 2
+/** Default editor pixels per device pixel (100% zoom). */
+export const BASE_SCALE = 2
+/** Matches firmware STATUS_H — reserved for IP + version footer. */
+export const STATUS_BAR_H = 14
 
 const WIDGET_TEMPLATES = {
   Button:     { w: 105, h: 80 },
   Toggle:     { w: 105, h: 80 },
   Slider:     { w: 30,  h: 140 },
   HSlider:    { w: 140, h: 30 },
-  HSVPicker:  { w: 90,  h: 140 },
-  IPDisplay:  { w: 120, h: 30 },
   PageButton: { w: 60,  h: 30 },
 }
 
@@ -16,7 +17,27 @@ export default function Canvas({
   widgets, selectedIds, onSelect, onSelectMany,
   onUpdate, onUpdateMany, onAddWidget, onCommitDrag, onGetSnapshot,
   screenW, screenH, showGrid, snapToGrid = true,
+  rotationDeg = 0, appVersion = '0.3.0', showPortLabels = true,
+  pageIdx = 0, scale = BASE_SCALE,
 }) {
+  const usableH = screenH - STATUS_BAR_H
+
+  /**
+   * Physical USB / microSD edges relative to screen content.
+   * Degrees are counter-clockwise (左回転) from 0°.
+   * 0° portrait: USB=bottom (cable down). 90° CCW landscape: USB=right, microSD=left.
+   */
+  const portEdges = (() => {
+    const deg = ((rotationDeg % 360) + 360) % 360
+    const map = {
+      0:   { usb: 'bottom', sd: 'top' },
+      90:  { usb: 'right',  sd: 'left' },
+      180: { usb: 'top',    sd: 'bottom' },
+      270: { usb: 'left',   sd: 'right' },
+    }
+    return map[deg] || map[0]
+  })()
+
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
   const dragState = useRef(null)
@@ -49,18 +70,18 @@ export default function Canvas({
     const widgetType = e.dataTransfer.getData('widgetType')
     if (!widgetType || !WIDGET_TEMPLATES[widgetType]) return
     const rect = canvasRef.current.getBoundingClientRect()
-    const x = Math.round(((e.clientX - rect.left) / SCALE - WIDGET_TEMPLATES[widgetType].w / 2) / 5) * 5
-    const y = Math.round(((e.clientY - rect.top) / SCALE - WIDGET_TEMPLATES[widgetType].h / 2) / 5) * 5
+    const x = Math.round(((e.clientX - rect.left) / scale - WIDGET_TEMPLATES[widgetType].w / 2) / 5) * 5
+    const y = Math.round(((e.clientY - rect.top) / scale - WIDGET_TEMPLATES[widgetType].h / 2) / 5) * 5
     onAddWidget(widgetType, x, y)
-  }, [onAddWidget])
+  }, [onAddWidget, scale])
 
   // --- Widget pointer: start move or resize drag ---
   const handlePointerDown = useCallback((e, widgetId, mode) => {
     e.stopPropagation()
     e.preventDefault()
     const rect = canvasRef.current.getBoundingClientRect()
-    const pointerX = (e.clientX - rect.left) / SCALE
-    const pointerY = (e.clientY - rect.top) / SCALE
+    const pointerX = (e.clientX - rect.left) / scale
+    const pointerY = (e.clientY - rect.top) / scale
     const additive = e.metaKey || e.ctrlKey
 
     dragSnapshotRef.current = onGetSnapshotRef.current()
@@ -81,7 +102,7 @@ export default function Canvas({
     }
 
     onSelect(widgetId, additive)
-  }, [onSelect])
+  }, [onSelect, scale])
 
   // --- Canvas background: just deselect (rubber band handled by container) ---
   const onCanvasPointerDown = useCallback((e) => {
@@ -95,11 +116,11 @@ export default function Canvas({
     if (e.metaKey || e.ctrlKey) return
     const rect = canvasRef.current.getBoundingClientRect()
     // Clamp start point to canvas coordinate space (can start from outside edge)
-    const x = Math.max(0, Math.min(screenW, (e.clientX - rect.left) / SCALE))
-    const y = Math.max(0, Math.min(screenH, (e.clientY - rect.top) / SCALE))
+    const x = Math.max(0, Math.min(screenW, (e.clientX - rect.left) / scale))
+    const y = Math.max(0, Math.min(screenH, (e.clientY - rect.top) / scale))
     rubberBandRef.current = { startX: x, startY: y, currentX: x, currentY: y }
     setRubberBandRect({ x, y, w: 0, h: 0 })
-  }, [screenW, screenH])
+  }, [screenW, screenH, scale])
 
   // --- Stable global handlers (no/minimal deps, read latest via refs) ---
   const handlePointerMove = useCallback((e) => {
@@ -109,8 +130,8 @@ export default function Canvas({
 
     if (dragState.current) {
       const state = dragState.current
-      const pointerX = (e.clientX - rect.left) / SCALE
-      const pointerY = (e.clientY - rect.top) / SCALE
+      const pointerX = (e.clientX - rect.left) / scale
+      const pointerY = (e.clientY - rect.top) / scale
       const dx = Math.round(pointerX - state.startX)
       const dy = Math.round(pointerY - state.startY)
 
@@ -124,10 +145,10 @@ export default function Canvas({
         let nx, ny
         if (snapToGrid) {
           nx = Math.max(0, Math.min(screenW - clampW, Math.round((firstOrig.x + dx) / 5) * 5))
-          ny = Math.max(0, Math.min(screenH - clampH, Math.round((firstOrig.y + dy) / 5) * 5))
+          ny = Math.max(0, Math.min(usableH - clampH, Math.round((firstOrig.y + dy) / 5) * 5))
         } else {
           nx = Math.max(0, Math.min(screenW - clampW, firstOrig.x + dx))
-          ny = Math.max(0, Math.min(screenH - clampH, firstOrig.y + dy))
+          ny = Math.max(0, Math.min(usableH - clampH, firstOrig.y + dy))
         }
         const snapDx = nx - firstOrig.x
         const snapDy = ny - firstOrig.y
@@ -141,7 +162,7 @@ export default function Canvas({
             const ww = widgetsRef.current.find(w => w.id === id)
             if (orig && ww) updates[id] = {
               x: Math.max(0, Math.min(screenW - ww.w, orig.x + snapDx)),
-              y: Math.max(0, Math.min(screenH - ww.h, orig.y + snapDy)),
+              y: Math.max(0, Math.min(usableH - ww.h, orig.y + snapDy)),
             }
           })
           onUpdateManyRef.current(prev =>
@@ -186,11 +207,11 @@ export default function Canvas({
           bottomEdge = Math.round(bottomEdge / 5) * 5
         }
 
-        // Clamp edges to screen
+        // Clamp edges to usable area (status bar reserved at bottom)
         leftEdge = Math.max(0, Math.min(screenW, leftEdge))
         rightEdge = Math.max(0, Math.min(screenW, rightEdge))
-        topEdge = Math.max(0, Math.min(screenH, topEdge))
-        bottomEdge = Math.max(0, Math.min(screenH, bottomEdge))
+        topEdge = Math.max(0, Math.min(usableH, topEdge))
+        bottomEdge = Math.max(0, Math.min(usableH, bottomEdge))
 
         // Ensure minimum size
         if (rightEdge - leftEdge < 10) {
@@ -210,8 +231,8 @@ export default function Canvas({
     }
 
     if (rubberBandRef.current) {
-      const cx = Math.max(0, Math.min(screenW, (e.clientX - rect.left) / SCALE))
-      const cy = Math.max(0, Math.min(screenH, (e.clientY - rect.top) / SCALE))
+      const cx = Math.max(0, Math.min(screenW, (e.clientX - rect.left) / scale))
+      const cy = Math.max(0, Math.min(screenH, (e.clientY - rect.top) / scale))
       rubberBandRef.current.currentX = cx
       rubberBandRef.current.currentY = cy
       const { startX, startY } = rubberBandRef.current
@@ -222,7 +243,7 @@ export default function Canvas({
         h: Math.abs(cy - startY),
       })
     }
-  }, [onUpdate, screenW, screenH, snapToGrid])
+  }, [onUpdate, screenW, screenH, usableH, snapToGrid, scale])
 
   const handlePointerUp = useCallback(() => {
     if (dragState.current !== null && dragSnapshotRef.current !== null) {
@@ -268,27 +289,34 @@ export default function Canvas({
       className="canvas-container"
       onPointerDown={onContainerPointerDown}
     >
-      <div
-        ref={canvasRef}
-        className="canvas"
-        style={{ width: screenW * SCALE, height: screenH * SCALE }}
-        onPointerDown={onCanvasPointerDown}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-      >
+      <div className="canvas-board-frame">
+        {showPortLabels && (
+          <>
+            <div className={`canvas-port-label edge-${portEdges.usb} port-usb`}>USB</div>
+            <div className={`canvas-port-label edge-${portEdges.sd} port-sd`}>microSD</div>
+          </>
+        )}
+        <div
+          ref={canvasRef}
+          className="canvas"
+          style={{ width: screenW * scale, height: screenH * scale }}
+          onPointerDown={onCanvasPointerDown}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
         {/* Grid dots */}
         {showGrid && (
           <svg
-            width={screenW * SCALE}
-            height={screenH * SCALE}
+            width={screenW * scale}
+            height={screenH * scale}
             style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }}
           >
             {Array.from({ length: screenW / 10 }).map((_, gx) =>
               Array.from({ length: screenH / 10 }).map((_, gy) => (
                 <circle
                   key={`${gx}-${gy}`}
-                  cx={gx * 10 * SCALE + 1}
-                  cy={gy * 10 * SCALE + 1}
+                  cx={gx * 10 * scale + 1}
+                  cy={gy * 10 * scale + 1}
                   r={1.2}
                   fill="#4a4a7e"
                 />
@@ -303,33 +331,51 @@ export default function Canvas({
             widget={w}
             isSelected={selectedIds.includes(w.id)}
             onPointerDown={handlePointerDown}
-            scale={SCALE}
+            scale={scale}
+            pageIdx={pageIdx}
           />
         ))}
+
+        {/* Firmware always draws IP + version here (portrait & landscape) */}
+        <div
+          className="canvas-status-bar"
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: (screenH - STATUS_BAR_H) * scale,
+            width: screenW * scale,
+            height: STATUS_BAR_H * scale,
+            pointerEvents: 'none',
+          }}
+        >
+          <span className="canvas-status-ip">192.168.x.x</span>
+          <span className="canvas-status-ver">v{appVersion}</span>
+        </div>
 
         {/* Rubber band selection rect */}
         {rubberBandRect && rubberBandRect.w > 1 && rubberBandRect.h > 1 && (
           <div
             className="rubber-band"
             style={{
-              left:   rubberBandRect.x * SCALE,
-              top:    rubberBandRect.y * SCALE,
-              width:  rubberBandRect.w * SCALE,
-              height: rubberBandRect.h * SCALE,
+              left:   rubberBandRect.x * scale,
+              top:    rubberBandRect.y * scale,
+              width:  rubberBandRect.w * scale,
+              height: rubberBandRect.h * scale,
             }}
           />
         )}
 
         <div className="canvas-label canvas-label-top" style={{ left: 0, top: -18 }}>0</div>
-        <div className="canvas-label canvas-label-top" style={{ left: screenW * SCALE, top: -18 }}>{screenW}</div>
+        <div className="canvas-label canvas-label-top" style={{ left: screenW * scale, top: -18 }}>{screenW}</div>
         <div className="canvas-label canvas-label-left" style={{ left: -36, top: 0 }}>0</div>
-        <div className="canvas-label canvas-label-left" style={{ left: -36, top: screenH * SCALE }}>{screenH}</div>
+        <div className="canvas-label canvas-label-left" style={{ left: -36, top: screenH * scale }}>{screenH}</div>
+      </div>
       </div>
     </div>
   )
 }
 
-function WidgetView({ widget, isSelected, onPointerDown, scale }) {
+function WidgetView({ widget, isSelected, onPointerDown, scale, pageIdx = 0 }) {
   const style = {
     position: 'absolute',
     left: widget.x * scale,
@@ -406,67 +452,6 @@ function WidgetView({ widget, isSelected, onPointerDown, scale }) {
     )
   }
 
-  if (widget.type === 'HSVPicker') {
-    const wheelR = Math.min(widget.w, widget.h) * 0.42;
-    const cx = widget.w * 0.5 - 10;
-    const cy = widget.h / 2;
-    const barX = widget.w - 20;
-    const stops = 24;
-    const wheelSVG = Array.from({ length: stops }, (_, i) => {
-      const a1 = (2 * Math.PI * i) / stops;
-      const a2 = (2 * Math.PI * (i + 1)) / stops;
-      const x1o = cx + wheelR * Math.cos(a1);
-      const y1o = cy + wheelR * Math.sin(a1);
-      const x2o = cx + wheelR * Math.cos(a2);
-      const y2o = cy + wheelR * Math.sin(a2);
-      const large = ((a2 - a1) / (2 * Math.PI)) > 0.5 ? 1 : 0;
-      const pathD = `M${cx},${cy}L${x1o.toFixed(1)},${y1o.toFixed(1)}A${wheelR},${wheelR} 0 ${large},1 ${x2o.toFixed(1)},${y2o.toFixed(1)}Z`;
-      const midAngle = (a1 + a2) / 2;
-      const hueDeg = ((midAngle / (2 * Math.PI)) * 360 + 360) % 360;
-      return <path key={i} d={pathD} fill={`hsl(${hueDeg},100%,50%)`} />;
-    });
-    const barGradId = `vbar-${widget.id}`;
-    return (
-      <div
-        className={`canvas-widget canvas-widget-hsv ${isSelected ? 'selected' : ''}`}
-        style={style}
-        onPointerDown={(e) => onPointerDown(e, widget.id, 'move')}
-      >
-        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tl" />
-        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tr" />
-        <svg width={widget.w} height={widget.h} className="hsv-wheel-svg">
-          <defs>
-            <linearGradient id={barGradId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#fff" />
-              <stop offset="100%" stopColor="#000" />
-            </linearGradient>
-          </defs>
-          {wheelSVG}
-          <rect x={barX} y={2} width={16} height={widget.h - 4} fill={`url(#${barGradId})`} rx={2} />
-        </svg>
-        <span className="widget-label hsv-label">{widget.label || 'HSV'}</span>
-        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="bl" />
-        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="br" />
-      </div>
-    )
-  }
-
-  if (widget.type === 'IPDisplay') {
-    return (
-      <div
-        className={`canvas-widget canvas-widget-ip ${isSelected ? 'selected' : ''}`}
-        style={style}
-        onPointerDown={(e) => onPointerDown(e, widget.id, 'move')}
-      >
-        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tl" />
-        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tr" />
-        <span className="widget-label">{widget.label || 'IP: ---'}</span>
-        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="bl" />
-        <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="br" />
-      </div>
-    )
-  }
-
   if (widget.type === 'PageButton') {
     const navMode = widget.nav_mode || 'goto'
     const defaultLabel = navMode === 'prev' ? '◀ PREV'
@@ -476,6 +461,9 @@ function WidgetView({ widget, isSelected, onPointerDown, scale }) {
       <div
         className={`canvas-widget canvas-widget-pagebutton ${isSelected ? 'selected' : ''}`}
         style={style}
+        data-page-link="1"
+        data-widget-id={widget.id}
+        data-page-idx={pageIdx}
         onPointerDown={(e) => onPointerDown(e, widget.id, 'move')}
       >
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tl" />

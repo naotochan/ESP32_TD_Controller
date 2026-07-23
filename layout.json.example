@@ -1,6 +1,6 @@
 {
-  "orientation": "portrait",
   "rotation": 0,
+  "orientation": "portrait",
   "pages": [
     [
       {
@@ -38,7 +38,7 @@
         "id": 1779861284425,
         "type": "HSlider",
         "x": 50,
-        "y": 225,
+        "y": 210,
         "w": 140,
         "h": 30,
         "label": "HSLIDER 1",

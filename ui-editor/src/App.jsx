@@ -1,22 +1,77 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import './App.css'
-import Canvas from './Canvas'
+import Canvas, { STATUS_BAR_H, BASE_SCALE } from './Canvas'
 import WidgetPanel from './WidgetPanel'
 import Properties from './Properties'
 import ExportButton from './ExportButton'
 import useUndoableState from './useUndoableState'
 import LayersPanel from './LayersPanel'
+import PageLinksOverlay from './PageLinksOverlay'
 
-const PORTRAIT = { w: 240, h: 320 }
-const LANDSCAPE = { w: 320, h: 240 }
+/** Screen size for rotation degrees 0/90/180/270 (CYD 240×320 panel). */
+function screenSizeForRotation(deg) {
+  return (deg % 180 === 0) ? { w: 240, h: 320 } : { w: 320, h: 240 }
+}
+
+/** Normalize loaded layout rotation → degrees 0|90|180|270. */
+export function normalizeRotationDeg(data) {
+  if (data && data.rotation != null) {
+    const r = Number(data.rotation)
+    if (r === 90 || r === 180 || r === 270) return r
+    if (r === 0 || r === 1 || r === 2 || r === 3) return r * 90
+  }
+  if (data && data.orientation === 'landscape') return 90
+  return 0
+}
+
+const ROTATION_STORAGE_KEY = 'esp32-td-rotation-deg'
+const ZOOM_STORAGE_KEY = 'esp32-td-editor-zoom'
+const ZOOM_MIN = 0.5
+const ZOOM_MAX = 2
+const ZOOM_STEP = 0.1
+
+function clampZoom(z) {
+  const n = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) * 10) / 10
+  return n
+}
+
+function loadStoredZoom() {
+  try {
+    const raw = localStorage.getItem(ZOOM_STORAGE_KEY)
+    if (raw == null) return 1
+    const n = Number(raw)
+    if (!Number.isFinite(n)) return 1
+    return clampZoom(n)
+  } catch {
+    return 1
+  }
+}
+
+function loadStoredRotationDeg() {
+  try {
+    const raw = localStorage.getItem(ROTATION_STORAGE_KEY)
+    if (raw == null) return 0
+    const n = Number(raw)
+    if (n === 0 || n === 90 || n === 180 || n === 270) return n
+  } catch {
+    /* private mode / SSR */
+  }
+  return 0
+}
+
+function storeRotationDeg(deg) {
+  try {
+    localStorage.setItem(ROTATION_STORAGE_KEY, String(deg))
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
 
 const WIDGET_TEMPLATES = {
   Button:     { type: 'Button',     w: 105, h: 80 },
   Toggle:     { type: 'Toggle',     w: 105, h: 80 },
   Slider:     { type: 'Slider',     w: 30,  h: 140 },
   HSlider:    { type: 'HSlider',    w: 140, h: 30 },
-  HSVPicker:  { type: 'HSVPicker',  w: 90,  h: 140 },
-  IPDisplay:  { type: 'IPDisplay',  w: 120, h: 30 },
   PageButton: { type: 'PageButton', w: 60,  h: 30 },
 }
 
@@ -26,39 +81,134 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(0)
   const [selectedIds, setSelectedIds] = useState([])
   const [clipboard, setClipboard] = useState([])
-  const [landscape, setLandscape] = useState(false)
+  const [rotationDeg, setRotationDeg] = useState(loadStoredRotationDeg)
   const [showGrid, setShowGrid] = useState(true)
   const [snapToGrid, setSnapToGrid] = useState(true)
+  const [zoom, setZoom] = useState(loadStoredZoom)
 
-  const screenW = landscape ? LANDSCAPE.w : PORTRAIT.w
-  const screenH = landscape ? LANDSCAPE.h : PORTRAIT.h
+  const { w: screenW, h: screenH } = screenSizeForRotation(rotationDeg)
+  const viewScale = BASE_SCALE * zoom
+
+  useEffect(() => {
+    storeRotationDeg(rotationDeg)
+  }, [rotationDeg])
+
+  useEffect(() => {
+    try { localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom)) } catch { /* ignore */ }
+  }, [zoom])
 
   // Stable refs so callbacks always read the latest values without deps
   const currentPageRef = useRef(currentPage)
   currentPageRef.current = currentPage
   const pagesRef = useRef(pagesState.value)
   pagesRef.current = pagesState.value
+  const pagesRowRef = useRef(null)
+  const canvasAreaRef = useRef(null)
+  const panRef = useRef(null)
+  const zoomRef = useRef(zoom)
+  zoomRef.current = zoom
+
+  const applyZoom = useCallback((nextZoom, anchor) => {
+    const el = canvasAreaRef.current
+    const oldZoom = zoomRef.current
+    const newZoom = clampZoom(nextZoom)
+    if (newZoom === oldZoom) return
+    if (el && anchor) {
+      const rect = el.getBoundingClientRect()
+      const mx = anchor.clientX - rect.left
+      const my = anchor.clientY - rect.top
+      const ratio = newZoom / oldZoom
+      setZoom(newZoom)
+      requestAnimationFrame(() => {
+        el.scrollLeft = (el.scrollLeft + mx) * ratio - mx
+        el.scrollTop = (el.scrollTop + my) * ratio - my
+      })
+    } else {
+      setZoom(newZoom)
+    }
+  }, [])
+
+  const onCanvasAreaWheel = useCallback((e) => {
+    if (!(e.ctrlKey || e.metaKey)) return
+    e.preventDefault()
+    const step = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP
+    applyZoom(zoomRef.current + step, { clientX: e.clientX, clientY: e.clientY })
+  }, [applyZoom])
+
+  useEffect(() => {
+    const el = canvasAreaRef.current
+    if (!el) return undefined
+    const onWheel = (e) => onCanvasAreaWheel(e)
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [onCanvasAreaWheel])
+
+  const onCanvasAreaPointerDown = useCallback((e) => {
+    if (e.button !== 0) return
+    // Pan only when starting on empty chrome (not pages, toolbar, buttons)
+    if (e.target.closest('.page-slot, .canvas-overlay-toolbar, button, a, input, select, textarea')) {
+      return
+    }
+    const el = canvasAreaRef.current
+    if (!el) return
+    panRef.current = {
+      pointerId: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      scrollLeft: el.scrollLeft,
+      scrollTop: el.scrollTop,
+    }
+    el.setPointerCapture(e.pointerId)
+    el.classList.add('is-panning')
+    e.preventDefault()
+  }, [])
+
+  const onCanvasAreaPointerMove = useCallback((e) => {
+    const pan = panRef.current
+    if (!pan || pan.pointerId !== e.pointerId) return
+    const el = canvasAreaRef.current
+    if (!el) return
+    el.scrollLeft = pan.scrollLeft - (e.clientX - pan.x)
+    el.scrollTop = pan.scrollTop - (e.clientY - pan.y)
+  }, [])
+
+  const endPan = useCallback((e) => {
+    const pan = panRef.current
+    if (!pan || (e && pan.pointerId !== e.pointerId)) return
+    panRef.current = null
+    const el = canvasAreaRef.current
+    if (el) {
+      el.classList.remove('is-panning')
+      try { el.releasePointerCapture(pan.pointerId) } catch { /* already released */ }
+    }
+  }, [])
 
   const widgets = pagesState.value[currentPage] || []
 
-  // --- Helpers: operate only on the current page ---
-  const updatePage = useCallback((updater) => {
+  // --- Helpers: operate on a specific page (defaults to current) ---
+  const updatePageAt = useCallback((pageIdx, updater) => {
     pagesState.set(prev => {
-      const pi = currentPageRef.current
       const next = [...prev]
-      next[pi] = updater(next[pi] || [])
+      next[pageIdx] = updater(next[pageIdx] || [])
       return next
     })
   }, [pagesState.set])
 
-  const updatePageSilent = useCallback((updater) => {
+  const updatePageAtSilent = useCallback((pageIdx, updater) => {
     pagesState.setSilent(prev => {
-      const pi = currentPageRef.current
       const next = [...prev]
-      next[pi] = updater(next[pi] || [])
+      next[pageIdx] = updater(next[pageIdx] || [])
       return next
     })
   }, [pagesState.setSilent])
+
+  const updatePage = useCallback((updater) => {
+    updatePageAt(currentPageRef.current, updater)
+  }, [updatePageAt])
+
+  const updatePageSilent = useCallback((updater) => {
+    updatePageAtSilent(currentPageRef.current, updater)
+  }, [updatePageAtSilent])
 
   // --- Page management ---
   const addPage = useCallback(() => {
@@ -73,10 +223,24 @@ export default function App() {
     if (len <= 1) return
     const widgetCount = pagesRef.current[idx]?.length ?? 0
     if (widgetCount > 0) {
-      const ok = window.confirm(`Page ${idx + 1} には ${widgetCount} 個のウィジェットがあります。\n削除してよいですか？`)
+      const ok = window.confirm(
+        `Page ${idx + 1} には ${widgetCount} 個のウィジェットがあります。\nこのページを削除しますか？`
+      )
       if (!ok) return
     }
-    pagesState.set(prev => prev.filter((_, i) => i !== idx))
+    pagesState.set(prev => {
+      const next = prev.filter((_, i) => i !== idx)
+      // Remap PageButton targets after the removed index
+      return next.map(pageWidgets =>
+        (pageWidgets || []).map(w => {
+          if (w.type !== 'PageButton' || (w.nav_mode || 'goto') !== 'goto') return w
+          const t = w.target_page ?? 0
+          if (t === idx) return { ...w, target_page: Math.min(idx, next.length - 1) }
+          if (t > idx) return { ...w, target_page: t - 1 }
+          return w
+        })
+      )
+    })
     setCurrentPage(prev => {
       if (idx < prev) return prev - 1
       return Math.min(prev, len - 2)
@@ -85,21 +249,23 @@ export default function App() {
   }, [pagesState.set])
 
   const switchPage = useCallback((idx) => {
+    if (idx === currentPageRef.current) return
     setCurrentPage(idx)
     setSelectedIds([])
   }, [])
 
   // --- Widget management ---
-  const onAddWidget = useCallback((templateType, x, y) => {
+  const onAddWidgetToPage = useCallback((pageIdx, templateType, x, y) => {
+    setCurrentPage(pageIdx)
     const tmpl = WIDGET_TEMPLATES[templateType]
-    const currentWidgets = pagesRef.current[currentPageRef.current] || []
+    const currentWidgets = pagesRef.current[pageIdx] || []
     const count = currentWidgets.filter(w => w.type === templateType).length + 1
     let nx = Math.max(0, Math.min(screenW - tmpl.w, x || 10))
-    let ny = Math.max(0, Math.min(screenH - tmpl.h, y || 10))
+    let ny = Math.max(0, Math.min(screenH - STATUS_BAR_H - tmpl.h, y || 10))
 
     const labels = {
       Button: 'BTN ', Toggle: 'TOG ', Slider: 'SLIDER ', HSlider: 'HSLIDER ',
-      HSVPicker: 'HSV ', IPDisplay: 'IP:', PageButton: 'PAGE ',
+      PageButton: 'PAGE ',
     }
     const newWidget = {
       id: Date.now(),
@@ -110,23 +276,25 @@ export default function App() {
                : templateType === 'Toggle'     ? `/esp32/toggle/${count}`
                : templateType === 'Slider'     ? `/esp32/slider/${count}`
                : templateType === 'HSlider'    ? `/esp32/hslider/${count}`
-               : templateType === 'HSVPicker'  ? `/esp32/color/${count}`
-               : templateType === 'IPDisplay'  ? `/esp32/ip/1`
                : '',
     }
     if (templateType === 'Slider' || templateType === 'HSlider') newWidget.default = 127
     if (templateType === 'Toggle') newWidget.default = 0
-    if (templateType === 'HSVPicker') newWidget.default = [127, 127, 127]
     if (templateType === 'PageButton') { newWidget.target_page = 1; newWidget.nav_mode = 'goto' }
 
     const overlap = currentWidgets.find(w => w.x === nx && w.y === ny)
     if (overlap) newWidget.x += tmpl.w + 5
 
-    updatePage(prev => [...prev, newWidget])
+    updatePageAt(pageIdx, prev => [...prev, newWidget])
     setSelectedIds([newWidget.id])
-  }, [updatePage, screenW, screenH])
+  }, [updatePageAt, screenW, screenH])
 
-  const onSelect = useCallback((id, additive = false) => {
+  const onAddWidget = useCallback((templateType, x, y) => {
+    onAddWidgetToPage(currentPageRef.current, templateType, x, y)
+  }, [onAddWidgetToPage])
+
+  const onSelectOnPage = useCallback((pageIdx, id, additive = false) => {
+    setCurrentPage(pageIdx)
     if (id == null) {
       setSelectedIds([])
     } else if (additive) {
@@ -138,7 +306,18 @@ export default function App() {
     }
   }, [])
 
-  const onSelectMany = useCallback((ids) => setSelectedIds(ids), [])
+  const onSelect = useCallback((id, additive = false) => {
+    onSelectOnPage(currentPageRef.current, id, additive)
+  }, [onSelectOnPage])
+
+  const onSelectManyOnPage = useCallback((pageIdx, ids) => {
+    setCurrentPage(pageIdx)
+    setSelectedIds(ids)
+  }, [])
+
+  const onSelectMany = useCallback((ids) => {
+    onSelectManyOnPage(currentPageRef.current, ids)
+  }, [onSelectManyOnPage])
 
   // History-recording versions (Properties panel)
   const onUpdate = useCallback((id, changes) => {
@@ -149,14 +328,14 @@ export default function App() {
     updatePage(updaterFn)
   }, [updatePage])
 
-  // Silent versions (Canvas drag — no per-frame history)
-  const onUpdateSilent = useCallback((id, changes) => {
-    updatePageSilent(prev => prev.map(w => w.id === id ? { ...w, ...changes } : w))
-  }, [updatePageSilent])
+  // Silent versions for a specific page (Canvas drag)
+  const onUpdateSilentOnPage = useCallback((pageIdx, id, changes) => {
+    updatePageAtSilent(pageIdx, prev => prev.map(w => w.id === id ? { ...w, ...changes } : w))
+  }, [updatePageAtSilent])
 
-  const onUpdateManySilent = useCallback((updaterFn) => {
-    updatePageSilent(updaterFn)
-  }, [updatePageSilent])
+  const onUpdateManySilentOnPage = useCallback((pageIdx, updaterFn) => {
+    updatePageAtSilent(pageIdx, updaterFn)
+  }, [updatePageAtSilent])
 
   // Canvas calls this to snapshot ALL pages at drag start, then commits on drag end
   const onGetSnapshot = useCallback(() => pagesRef.current, [])
@@ -232,7 +411,7 @@ export default function App() {
           ...w,
           id: base + i,
           x: Math.min(screenW - w.w, w.x + 10),
-          y: Math.min(screenH - w.h, w.y + 10),
+          y: Math.min(screenH - STATUS_BAR_H - w.h, w.y + 10),
         }))
         updatePage(prev => [...prev, ...pasted])
         setSelectedIds(pasted.map(w => w.id))
@@ -251,14 +430,14 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>ESP32 UI Layout Editor <span className="app-version">v0.2.1</span></h1>
+        <h1>ESP32 UI Layout Editor <span className="app-version">v0.3.4</span></h1>
         <div className="header-actions">
           <ExportButton
             pages={pagesState.value}
-            orientation={landscape ? 'landscape' : 'portrait'}
+            rotationDeg={rotationDeg}
             onLoad={(data) => {
               pagesState.set(() => data.pages)
-              setLandscape(data.orientation === 'landscape')
+              setRotationDeg(normalizeRotationDeg(data))
               setCurrentPage(0)
               setSelectedIds([])
             }}
@@ -266,28 +445,17 @@ export default function App() {
         </div>
       </header>
 
-      <div className="page-tabs">
-        {pagesState.value.map((_, idx) => (
-          <button
-            key={idx}
-            className={`page-tab ${idx === currentPage ? 'active' : ''}`}
-            onClick={() => switchPage(idx)}
-          >
-            Page {idx + 1}
-            {pageCount > 1 && (
-              <span
-                className="page-tab-close"
-                onClick={e => { e.stopPropagation(); removePage(idx) }}
-              >×</span>
-            )}
-          </button>
-        ))}
-        <button className="page-tab-add" onClick={addPage}>+ Page</button>
-      </div>
-
       <div className="app-body">
         <WidgetPanel onDrop={onAddWidget} />
-        <div className="canvas-area">
+        <div className="canvas-area-shell">
+        <div
+          className="canvas-area"
+          ref={canvasAreaRef}
+          onPointerDown={onCanvasAreaPointerDown}
+          onPointerMove={onCanvasAreaPointerMove}
+          onPointerUp={endPan}
+          onPointerCancel={endPan}
+        >
           <div className="canvas-overlay-toolbar">
             <button
               className={`canvas-tool-btn ${pagesState.canUndo ? '' : 'disabled'}`}
@@ -300,11 +468,23 @@ export default function App() {
               title="Redo (Cmd+Shift+Z)"
             >Redo ↪</button>
             <div className="canvas-toolbar-sep" />
-            <button
-              className={`canvas-tool-btn ${landscape ? 'active' : ''}`}
-              onClick={() => setLandscape(prev => !prev)}
-              title="向きを切り替え"
-            >{landscape ? 'Land' : 'Port'}</button>
+            <div className="canvas-rotation-group" title="回転">
+              <button
+                type="button"
+                className="canvas-tool-btn canvas-rot-btn"
+                onClick={() => setRotationDeg((d) => (d + 90) % 360)}
+                title="左回転"
+                aria-label="左回転"
+              >↶</button>
+              <span className="canvas-rot-deg">{rotationDeg}°</span>
+              <button
+                type="button"
+                className="canvas-tool-btn canvas-rot-btn"
+                onClick={() => setRotationDeg((d) => (d + 270) % 360)}
+                title="右回転"
+                aria-label="右回転"
+              >↷</button>
+            </div>
             <button
               className={`canvas-tool-btn ${showGrid ? 'active' : ''}`}
               onClick={() => setShowGrid(prev => !prev)}
@@ -315,22 +495,100 @@ export default function App() {
               onClick={() => setSnapToGrid(prev => !prev)}
               title="スナップ"
             >Snap</button>
+            <div className="canvas-toolbar-sep" />
+            <div className="canvas-zoom-group" title="ズーム (Ctrl/⌘ + ホイール)">
+              <button
+                type="button"
+                className="canvas-tool-btn"
+                onClick={() => applyZoom(zoom - ZOOM_STEP)}
+                disabled={zoom <= ZOOM_MIN}
+                title="縮小"
+              >−</button>
+              <button
+                type="button"
+                className="canvas-tool-btn canvas-zoom-pct"
+                onClick={() => applyZoom(1)}
+                title="100% に戻す"
+              >{Math.round(zoom * 100)}%</button>
+              <button
+                type="button"
+                className="canvas-tool-btn"
+                onClick={() => applyZoom(zoom + ZOOM_STEP)}
+                disabled={zoom >= ZOOM_MAX}
+                title="拡大"
+              >+</button>
+            </div>
           </div>
-          <Canvas
-            widgets={widgets}
-            selectedIds={selectedIds}
-            onSelect={onSelect}
-            onSelectMany={onSelectMany}
-            onAddWidget={onAddWidget}
-            onUpdate={onUpdateSilent}
-            onUpdateMany={onUpdateManySilent}
-            onCommitDrag={onCommitDrag}
-            onGetSnapshot={onGetSnapshot}
-            screenW={screenW}
-            screenH={screenH}
-            showGrid={showGrid}
-            snapToGrid={snapToGrid}
-          />
+
+          <div className="pages-row" ref={pagesRowRef}>
+            <PageLinksOverlay
+              containerRef={pagesRowRef}
+              pages={pagesState.value}
+              selectedIds={selectedIds}
+              currentPage={currentPage}
+              revision={`${rotationDeg}-${screenW}x${screenH}-${pageCount}-${zoom}`}
+            />
+            {pagesState.value.map((pageWidgets, idx) => {
+              const active = idx === currentPage
+              return (
+                <div
+                  key={idx}
+                  className={`page-slot ${active ? 'active' : ''}`}
+                  data-page-slot={idx}
+                  onMouseDown={() => switchPage(idx)}
+                >
+                  <Canvas
+                    widgets={pageWidgets}
+                    selectedIds={active ? selectedIds : []}
+                    onSelect={(id, additive) => onSelectOnPage(idx, id, additive)}
+                    onSelectMany={(ids) => onSelectManyOnPage(idx, ids)}
+                    onAddWidget={(type, x, y) => onAddWidgetToPage(idx, type, x, y)}
+                    onUpdate={(id, changes) => onUpdateSilentOnPage(idx, id, changes)}
+                    onUpdateMany={(fn) => onUpdateManySilentOnPage(idx, fn)}
+                    onCommitDrag={onCommitDrag}
+                    onGetSnapshot={onGetSnapshot}
+                    screenW={screenW}
+                    screenH={screenH}
+                    showGrid={showGrid}
+                    snapToGrid={snapToGrid}
+                    rotationDeg={rotationDeg}
+                    appVersion="0.3.4"
+                    showPortLabels={idx === 0}
+                    pageIdx={idx}
+                    scale={viewScale}
+                  />
+                  {active && pageCount > 1 && (
+                    <button
+                      type="button"
+                      className="page-slot-trash"
+                      title="このページを削除"
+                      onClick={(e) => { e.stopPropagation(); removePage(idx) }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                        <path
+                          fill="currentColor"
+                          d="M5.5 1h5l.5 1H14v1.5H2V2h3l.5-1zM3 4.5h10l-.7 9.2A1.5 1.5 0 0 1 10.8 15H5.2a1.5 1.5 0 0 1-1.5-1.3L3 4.5zm3 2v6h1.5v-6H6zm2.5 0v6H10v-6H8.5z"
+                        />
+                      </svg>
+                    </button>
+                  )}
+                  <div className="page-slot-footer">
+                    <span className="page-slot-name">Page {idx + 1}</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        <button
+          type="button"
+          className="page-add-fab"
+          onClick={addPage}
+          title="ページを追加"
+          aria-label="ページを追加"
+        >
+          +
+        </button>
         </div>
         <div className="right-sidebar">
           <Properties

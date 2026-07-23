@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 
-const NEEDS_OSC = new Set(['Button', 'Toggle', 'Slider', 'HSlider', 'HSVPicker'])
+const NEEDS_OSC = new Set(['Button', 'Toggle', 'Slider', 'HSlider'])
 
 /** Returns warning strings for layout issues (empty OSC, duplicates, bad PageButton targets). */
 function validateLayout(pages) {
@@ -38,7 +38,7 @@ function validateLayout(pages) {
   return warnings
 }
 
-export default function ExportButton({ pages, orientation = 'portrait', onLoad }) {
+export default function ExportButton({ pages, rotationDeg = 0, onLoad }) {
   const [status, setStatus] = useState('')
   // null = server down; object from /status when up
   const [deviceStatus, setDeviceStatus] = useState(null)
@@ -65,8 +65,14 @@ export default function ExportButton({ pages, orientation = 'portrait', onLoad }
   }
 
   const buildJson = () => {
-    const rotation = orientation === 'landscape' ? 1 : 0
-    return { orientation, rotation, pages }
+    const deg = ((Number(rotationDeg) % 360) + 360) % 360
+    const normalized = [0, 90, 180, 270].includes(deg) ? deg : 0
+    return {
+      rotation: normalized,
+      // legacy hint for older firmware
+      orientation: (normalized % 180 === 0) ? 'portrait' : 'landscape',
+      pages,
+    }
   }
 
   const confirmWarnings = (actionLabel) => {
