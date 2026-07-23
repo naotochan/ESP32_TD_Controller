@@ -45,7 +45,7 @@ def _read_osc_string(data, offset):
 
 def parse_message(data):
     """Parse a single OSC message. Returns (address, [args]) or None."""
-    if not data or data[0:1] == b'#':  # skip bundles
+    if not data or data[0:1] == b'#':
         return None
     address, offset = _read_osc_string(data, 0)
     if not address or not address.startswith('/'):
@@ -81,6 +81,39 @@ def parse_message(data):
     return address, args
 
 
+def _parse_bundle(data):
+    """Unpack OSC bundle → list of (address, [args]). TD OSC Out often sends bundles."""
+    # "#bundle\0" (8) + timetag (8)
+    if len(data) < 16:
+        return []
+    offset = 16
+    out = []
+    while offset + 4 <= len(data):
+        size = struct.unpack('>i', data[offset:offset + 4])[0]
+        offset += 4
+        if size <= 0 or offset + size > len(data):
+            break
+        chunk = data[offset:offset + size]
+        offset += size
+        if chunk.startswith(b'#bundle'):
+            out.extend(_parse_bundle(chunk))
+        else:
+            msg = parse_message(chunk)
+            if msg:
+                out.append(msg)
+    return out
+
+
+def parse_packet(data):
+    """Parse OSC message or bundle. Returns list of (address, [args])."""
+    if not data:
+        return []
+    if data.startswith(b'#bundle'):
+        return _parse_bundle(data)
+    msg = parse_message(data)
+    return [msg] if msg else []
+
+
 class OSCSender:
     def __init__(self, host, port):
         self.host = host
@@ -98,7 +131,7 @@ class OSCSender:
 class OSCReceiver:
     """Non-blocking UDP OSC listener. poll() returns list of (addr, args)."""
 
-    def __init__(self, port, bufsize=256):
+    def __init__(self, port, bufsize=1024):
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.bind(('0.0.0.0', port))
         self._sock.settimeout(0)
@@ -111,9 +144,7 @@ class OSCReceiver:
                 data, _addr = self._sock.recvfrom(self._bufsize)
             except OSError:
                 break
-            parsed = parse_message(data)
-            if parsed:
-                messages.append(parsed)
+            messages.extend(parse_packet(data))
         return messages
 
     def close(self):

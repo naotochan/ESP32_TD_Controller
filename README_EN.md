@@ -18,7 +18,7 @@ Touch interactions (buttons, toggles, sliders, color pickers, page switching) ar
                                                            └─────────────┘
 ```
 
-**Version:** 0.3.6
+**Version:** 0.3.7
 
 ---
 
@@ -72,8 +72,8 @@ cat > .env << EOF
 WIFI_SSID=your_wifi_ssid
 WIFI_PASSWORD=your_wifi_password
 OSC_HOST=192.168.x.x        # IP of the machine running TouchDesigner
-OSC_PORT=7000
-# OSC_LISTEN_PORT=7001      # optional: TD→ESP32 receive (omit to disable)
+OSC_PORT=24320              # TD <- ESP32 (match CYD_TD_Controller Listen Port)
+# OSC_LISTEN_PORT=24321     # optional: TD→ESP32 receive (match Send Port; omit to disable)
 EOF
 ```
 
@@ -93,9 +93,34 @@ This writes `boot.py` / `main.py` / `ui.py` / `widgets.py` / `layout.json` / `li
 
 ### 6. TouchDesigner side
 
-Place an OSC In CHOP, set **Port to 7000**, and enable Active. Touch input from the ESP32 will flow into the CHOP.
+Recommended ports (match the `CYD_TD_Controller` COMP):
 
-For TD→ESP32 (remote slider/toggle updates), add `OSC_LISTEN_PORT=7001` to `.env`, redeploy, and send OSC to that port from TD.
+| Direction | Port | `.env` / COMP |
+|---|---|---|
+| TD ← ESP32 | **24320** | `OSC_PORT` / Listen Port |
+| TD → ESP32 | **24321** | `OSC_LISTEN_PORT` / Send Port |
+
+For a bare OSC In CHOP, set Port to match `OSC_PORT` and enable Active.
+
+#### TD → ESP32 (optional)
+
+1. Add `OSC_LISTEN_PORT=24321` to `.env` and run `./deploy.sh`
+2. Set ESP32 Address / Send Port on the COMP, turn **Send Active** on
+3. Feed values into `null_send` (or the built-in `send_values`)
+   - Channel names **without** a leading `/` (e.g. `esp32/slider/1`); OSC Out prepends `/`
+   - Only Slider / HSlider / Toggle update the display (values 0–255)
+4. Keep OSC Out **Send Events Every Cook** off unless you want continuous CYD redraws
+
+#### `out_scene` (TD scene index)
+
+Not the same as ESP32 **pages**. Rising edges on `button/1`–`button/4` set `scene = 0–3` for TD show control.
+
+| Button | scene |
+|---|---|
+| button/1 | 0 |
+| button/2 | 1 |
+| button/3 | 2 |
+| button/4 | 3 |
 
 ---
 
@@ -160,7 +185,7 @@ Drag-and-drop widgets in the browser, then hit **Deploy** — `layout.json` is t
 
 Addresses can be freely changed in the editor.
 
-**Receive (optional):** When `OSC_LISTEN_PORT` is set, sending a float to the same address updates Slider / HSlider / Toggle display values.
+**Receive (optional):** When `OSC_LISTEN_PORT` is set, sending a float to the same address updates Slider / HSlider / Toggle display values. OSC bundles (TD OSC Out often sends `#bundle`) are supported. Unchanged values do not trigger a redraw.
 
 ---
 

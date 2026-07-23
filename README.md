@@ -18,7 +18,7 @@ ESP32 + 2.8インチタッチスクリーンを **TouchDesigner 向け OSC コ�
                                                            └─────────────┘
 ```
 
-**Version:** 0.3.6
+**Version:** 0.3.7
 
 ---
 
@@ -72,8 +72,8 @@ cat > .env << EOF
 WIFI_SSID=your_wifi_ssid
 WIFI_PASSWORD=your_wifi_password
 OSC_HOST=192.168.x.x        # TouchDesigner を動かしている PC の IP
-OSC_PORT=7000
-# OSC_LISTEN_PORT=7001      # 任意: TD→ESP32 受信（未設定ならオフ）
+OSC_PORT=24320              # TD <- ESP32（CYD_TD_Controller Listen Port と一致）
+# OSC_LISTEN_PORT=24321     # 任意: TD→ESP32 受信（Send Port と一致、未設定ならオフ）
 EOF
 ```
 
@@ -93,9 +93,34 @@ EOF
 
 ### 6. TouchDesigner 側
 
-OSC In CHOP を配置し **Port を 7000** に設定 → Active をオン。ESP32 のタッチ操作が CHOP に流れてきます。
+推奨ポート（`CYD_TD_Controller` COMP と揃える）:
 
-TD→ESP32（スライダー等のリモート更新）を使う場合は `.env` に `OSC_LISTEN_PORT=7001` を追加して再デプロイし、TD からそのポートへ OSC を送ってください。
+| 方向 | ポート | `.env` / COMP |
+|---|---|---|
+| TD ← ESP32 | **24320** | `OSC_PORT` / Listen Port |
+| TD → ESP32 | **24321** | `OSC_LISTEN_PORT` / Send Port |
+
+自前の OSC In なら Port を `OSC_PORT` と同じにして Active をオン。
+
+#### TD → ESP32（任意）
+
+1. `.env` に `OSC_LISTEN_PORT=24321` を入れて `./deploy.sh`
+2. COMP で ESP32 Address / Send Port を合わせ、**Send Active** をオン
+3. `null_send` に値を流す（または COMP 内 `send_values`）
+   - チャンネル名は **先頭 `/` なし**（例: `esp32/slider/1`）。OSC Out が `/` を付ける
+   - Slider / HSlider / Toggle のみ表示更新（値は 0〜255）
+4. OSC Out の **Send Events Every Cook はオフ推奨**（オンだと CYD が毎フレーム再描画される）
+
+#### `out_scene`（TD 用シーン番号）
+
+ESP32 の **Page とは別**。`button/1`〜`button/4` の立ち上がりで `scene = 0〜3` を出し、TD 側の演出切替などに使う。
+
+| ボタン | scene |
+|---|---|
+| button/1 | 0 |
+| button/2 | 1 |
+| button/3 | 2 |
+| button/4 | 3 |
 
 ---
 
@@ -160,7 +185,7 @@ TD→ESP32（スライダー等のリモート更新）を使う場合は `.env`
 
 アドレスはエディタで自由に変更可能。
 
-**受信（任意）:** `OSC_LISTEN_PORT` 設定時、同じアドレスに float を送ると Slider / HSlider / Toggle の表示値を更新します。
+**受信（任意）:** `OSC_LISTEN_PORT` 設定時、同じアドレスに float を送ると Slider / HSlider / Toggle の表示値を更新します。OSC バンドル（TD OSC Out がよく送る `#bundle`）にも対応。値が変わらない更新では画面を再描画しません。
 
 ---
 
