@@ -76,6 +76,48 @@ export default function App() {
   const pagesRef = useRef(pagesState.value)
   pagesRef.current = pagesState.value
   const pagesRowRef = useRef(null)
+  const canvasAreaRef = useRef(null)
+  const panRef = useRef(null)
+
+  const onCanvasAreaPointerDown = useCallback((e) => {
+    if (e.button !== 0) return
+    // Pan only when starting on empty chrome (not pages, toolbar, buttons)
+    if (e.target.closest('.page-slot, .canvas-overlay-toolbar, button, a, input, select, textarea')) {
+      return
+    }
+    const el = canvasAreaRef.current
+    if (!el) return
+    panRef.current = {
+      pointerId: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      scrollLeft: el.scrollLeft,
+      scrollTop: el.scrollTop,
+    }
+    el.setPointerCapture(e.pointerId)
+    el.classList.add('is-panning')
+    e.preventDefault()
+  }, [])
+
+  const onCanvasAreaPointerMove = useCallback((e) => {
+    const pan = panRef.current
+    if (!pan || pan.pointerId !== e.pointerId) return
+    const el = canvasAreaRef.current
+    if (!el) return
+    el.scrollLeft = pan.scrollLeft - (e.clientX - pan.x)
+    el.scrollTop = pan.scrollTop - (e.clientY - pan.y)
+  }, [])
+
+  const endPan = useCallback((e) => {
+    const pan = panRef.current
+    if (!pan || (e && pan.pointerId !== e.pointerId)) return
+    panRef.current = null
+    const el = canvasAreaRef.current
+    if (el) {
+      el.classList.remove('is-panning')
+      try { el.releasePointerCapture(pan.pointerId) } catch { /* already released */ }
+    }
+  }, [])
 
   const widgets = pagesState.value[currentPage] || []
 
@@ -341,7 +383,14 @@ export default function App() {
 
       <div className="app-body">
         <WidgetPanel onDrop={onAddWidget} />
-        <div className="canvas-area">
+        <div
+          className="canvas-area"
+          ref={canvasAreaRef}
+          onPointerDown={onCanvasAreaPointerDown}
+          onPointerMove={onCanvasAreaPointerMove}
+          onPointerUp={endPan}
+          onPointerCancel={endPan}
+        >
           <div className="canvas-overlay-toolbar">
             <button
               className={`canvas-tool-btn ${pagesState.canUndo ? '' : 'disabled'}`}
@@ -381,19 +430,6 @@ export default function App() {
               onClick={() => setSnapToGrid(prev => !prev)}
               title="スナップ"
             >Snap</button>
-            <div className="canvas-toolbar-sep" />
-            <button
-              className="canvas-tool-btn canvas-tool-btn-page"
-              onClick={addPage}
-              title="ページを追加"
-            >＋ ページ</button>
-            {pageCount > 1 && (
-              <button
-                className="canvas-tool-btn canvas-tool-btn-page-del"
-                onClick={() => removePage(currentPage)}
-                title="選択中のページを削除"
-              >− ページ削除</button>
-            )}
           </div>
 
           <div className="pages-row" ref={pagesRowRef}>
@@ -432,16 +468,23 @@ export default function App() {
                     showPortLabels={idx === 0}
                     pageIdx={idx}
                   />
+                  {active && pageCount > 1 && (
+                    <button
+                      type="button"
+                      className="page-slot-trash"
+                      title="このページを削除"
+                      onClick={(e) => { e.stopPropagation(); removePage(idx) }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                        <path
+                          fill="currentColor"
+                          d="M5.5 1h5l.5 1H14v1.5H2V2h3l.5-1zM3 4.5h10l-.7 9.2A1.5 1.5 0 0 1 10.8 15H5.2a1.5 1.5 0 0 1-1.5-1.3L3 4.5zm3 2v6h1.5v-6H6zm2.5 0v6H10v-6H8.5z"
+                        />
+                      </svg>
+                    </button>
+                  )}
                   <div className="page-slot-footer">
                     <span className="page-slot-name">Page {idx + 1}</span>
-                    {pageCount > 1 && (
-                      <button
-                        type="button"
-                        className="page-slot-remove"
-                        title="このページを削除"
-                        onClick={(e) => { e.stopPropagation(); removePage(idx) }}
-                      >削除</button>
-                    )}
                   </div>
                 </div>
               )
