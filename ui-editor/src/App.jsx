@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import './App.css'
 import Canvas, { STATUS_BAR_H, BASE_SCALE } from './Canvas'
 import WidgetPanel from './WidgetPanel'
@@ -85,9 +85,9 @@ export default function App() {
   const [showGrid, setShowGrid] = useState(true)
   const [snapToGrid, setSnapToGrid] = useState(true)
   const [zoom, setZoom] = useState(loadStoredZoom)
+  const [pagesSize, setPagesSize] = useState({ w: 0, h: 0 })
 
   const { w: screenW, h: screenH } = screenSizeForRotation(rotationDeg)
-  const viewScale = BASE_SCALE * zoom
 
   useEffect(() => {
     storeRotationDeg(rotationDeg)
@@ -107,6 +107,25 @@ export default function App() {
   const panRef = useRef(null)
   const zoomRef = useRef(zoom)
   zoomRef.current = zoom
+
+  const pageCount = pagesState.value.length
+
+  // Measure unscaled pages-row layout size (zoom is CSS transform only)
+  useLayoutEffect(() => {
+    const row = pagesRowRef.current
+    const area = canvasAreaRef.current
+    if (!row) return undefined
+    const measure = () => {
+      const w = Math.max(row.scrollWidth, area?.clientWidth ?? 0)
+      const h = Math.max(row.scrollHeight, 1)
+      setPagesSize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(row)
+    if (area) ro.observe(area)
+    return () => ro.disconnect()
+  }, [pageCount, rotationDeg, screenW, screenH])
 
   const applyZoom = useCallback((nextZoom, anchor) => {
     const el = canvasAreaRef.current
@@ -425,12 +444,13 @@ export default function App() {
     ? widgets.find(w => w.id === selectedIds[0]) || null
     : null
 
-  const pageCount = pagesState.value.length
+  const zoomW = (pagesSize.w || 1) * zoom
+  const zoomH = (pagesSize.h || 1) * zoom
 
   return (
     <div className="app">
       <header className="app-header">
-        <h1>ESP32 UI Layout Editor <span className="app-version">v0.3.4</span></h1>
+        <h1>ESP32 UI Layout Editor <span className="app-version">v0.3.6</span></h1>
         <div className="header-actions">
           <ExportButton
             pages={pagesState.value}
@@ -520,64 +540,79 @@ export default function App() {
             </div>
           </div>
 
-          <div className="pages-row" ref={pagesRowRef}>
-            <PageLinksOverlay
-              containerRef={pagesRowRef}
-              pages={pagesState.value}
-              selectedIds={selectedIds}
-              currentPage={currentPage}
-              revision={`${rotationDeg}-${screenW}x${screenH}-${pageCount}-${zoom}`}
-            />
-            {pagesState.value.map((pageWidgets, idx) => {
-              const active = idx === currentPage
-              return (
-                <div
-                  key={idx}
-                  className={`page-slot ${active ? 'active' : ''}`}
-                  data-page-slot={idx}
-                  onMouseDown={() => switchPage(idx)}
-                >
-                  <Canvas
-                    widgets={pageWidgets}
-                    selectedIds={active ? selectedIds : []}
-                    onSelect={(id, additive) => onSelectOnPage(idx, id, additive)}
-                    onSelectMany={(ids) => onSelectManyOnPage(idx, ids)}
-                    onAddWidget={(type, x, y) => onAddWidgetToPage(idx, type, x, y)}
-                    onUpdate={(id, changes) => onUpdateSilentOnPage(idx, id, changes)}
-                    onUpdateMany={(fn) => onUpdateManySilentOnPage(idx, fn)}
-                    onCommitDrag={onCommitDrag}
-                    onGetSnapshot={onGetSnapshot}
-                    screenW={screenW}
-                    screenH={screenH}
-                    showGrid={showGrid}
-                    snapToGrid={snapToGrid}
-                    rotationDeg={rotationDeg}
-                    appVersion="0.3.4"
-                    showPortLabels={idx === 0}
-                    pageIdx={idx}
-                    scale={viewScale}
-                  />
-                  {active && pageCount > 1 && (
-                    <button
-                      type="button"
-                      className="page-slot-trash"
-                      title="このページを削除"
-                      onClick={(e) => { e.stopPropagation(); removePage(idx) }}
+          <div
+            className="pages-zoom-spacer"
+            style={{ width: zoomW, height: zoomH }}
+          >
+            <div
+              className="pages-zoom-content"
+              style={{
+                width: pagesSize.w || '100%',
+                height: pagesSize.h || '100%',
+                transform: `scale(${zoom})`,
+              }}
+            >
+              <div className="pages-row" ref={pagesRowRef}>
+                <PageLinksOverlay
+                  containerRef={pagesRowRef}
+                  pages={pagesState.value}
+                  selectedIds={selectedIds}
+                  currentPage={currentPage}
+                  zoom={zoom}
+                  revision={`${rotationDeg}-${screenW}x${screenH}-${pageCount}-${zoom}-${pagesSize.w}x${pagesSize.h}`}
+                />
+                {pagesState.value.map((pageWidgets, idx) => {
+                  const active = idx === currentPage
+                  return (
+                    <div
+                      key={idx}
+                      className={`page-slot ${active ? 'active' : ''}`}
+                      data-page-slot={idx}
+                      onMouseDown={() => switchPage(idx)}
                     >
-                      <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-                        <path
-                          fill="currentColor"
-                          d="M5.5 1h5l.5 1H14v1.5H2V2h3l.5-1zM3 4.5h10l-.7 9.2A1.5 1.5 0 0 1 10.8 15H5.2a1.5 1.5 0 0 1-1.5-1.3L3 4.5zm3 2v6h1.5v-6H6zm2.5 0v6H10v-6H8.5z"
-                        />
-                      </svg>
-                    </button>
-                  )}
-                  <div className="page-slot-footer">
-                    <span className="page-slot-name">Page {idx + 1}</span>
-                  </div>
-                </div>
-              )
-            })}
+                      <Canvas
+                        widgets={pageWidgets}
+                        selectedIds={active ? selectedIds : []}
+                        onSelect={(id, additive) => onSelectOnPage(idx, id, additive)}
+                        onSelectMany={(ids) => onSelectManyOnPage(idx, ids)}
+                        onAddWidget={(type, x, y) => onAddWidgetToPage(idx, type, x, y)}
+                        onUpdate={(id, changes) => onUpdateSilentOnPage(idx, id, changes)}
+                        onUpdateMany={(fn) => onUpdateManySilentOnPage(idx, fn)}
+                        onCommitDrag={onCommitDrag}
+                        onGetSnapshot={onGetSnapshot}
+                        screenW={screenW}
+                        screenH={screenH}
+                        showGrid={showGrid}
+                        snapToGrid={snapToGrid}
+                        rotationDeg={rotationDeg}
+                        appVersion="0.3.6"
+                        showPortLabels
+                        pageIdx={idx}
+                        scale={BASE_SCALE}
+                      />
+                      {active && pageCount > 1 && (
+                        <button
+                          type="button"
+                          className="page-slot-trash"
+                          title="このページを削除"
+                          onClick={(e) => { e.stopPropagation(); removePage(idx) }}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                            <path
+                              fill="currentColor"
+                              d="M5.5 1h5l.5 1H14v1.5H2V2h3l.5-1zM3 4.5h10l-.7 9.2A1.5 1.5 0 0 1 10.8 15H5.2a1.5 1.5 0 0 1-1.5-1.3L3 4.5zm3 2v6h1.5v-6H6zm2.5 0v6H10v-6H8.5z"
+                            />
+                          </svg>
+                        </button>
+                      )}
+                      <div className="page-slot-footer">
+                        <span className="page-slot-name">Page {idx + 1}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
           </div>
         </div>
         <button
