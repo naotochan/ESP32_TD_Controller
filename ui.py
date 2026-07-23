@@ -109,7 +109,10 @@ class Toggle(Widget):
         return 1.0 if self._on else 0.0
 
     def set_on(self, on, redraw=True):
-        self._on = bool(on)
+        on = bool(on)
+        if on == self._on:
+            return
+        self._on = on
         if redraw:
             self.draw()
 
@@ -177,7 +180,10 @@ class Slider(Widget):
         return self._value
 
     def set_value(self, v, redraw=True):
-        self._value = int(max(0, min(255, v)))
+        v = int(max(0, min(255, v)))
+        if v == self._value:
+            return
+        self._value = v
         self._prev_ky = None
         if redraw:
             self.draw()
@@ -293,7 +299,10 @@ class HSlider(Widget):
         return self._value
 
     def set_value(self, v, redraw=True):
-        self._value = int(max(0, min(255, v)))
+        v = int(max(0, min(255, v)))
+        if v == self._value:
+            return
+        self._value = v
         self._prev_kx = None
         if redraw:
             self.draw()
