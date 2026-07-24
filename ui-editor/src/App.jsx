@@ -7,6 +7,7 @@ import ExportButton from './ExportButton'
 import useUndoableState from './useUndoableState'
 import LayersPanel from './LayersPanel'
 import PageLinksOverlay from './PageLinksOverlay'
+import { nextUniqueLabel, nextUniqueOscAddr, uniquifyWidgets } from './uniqueNames'
 
 /** Screen size for rotation degrees 0/90/180/270 (CYD 240×320 panel). */
 function screenSizeForRotation(deg) {
@@ -277,25 +278,17 @@ export default function App() {
   const onAddWidgetToPage = useCallback((pageIdx, templateType, x, y) => {
     setCurrentPage(pageIdx)
     const tmpl = WIDGET_TEMPLATES[templateType]
-    const currentWidgets = pagesRef.current[pageIdx] || []
-    const count = currentWidgets.filter(w => w.type === templateType).length + 1
+    const pages = pagesRef.current
+    const currentWidgets = pages[pageIdx] || []
     let nx = Math.max(0, Math.min(screenW - tmpl.w, x || 10))
     let ny = Math.max(0, Math.min(screenH - STATUS_BAR_H - tmpl.h, y || 10))
 
-    const labels = {
-      Button: 'BTN ', Toggle: 'TOG ', Slider: 'SLIDER ', HSlider: 'HSLIDER ',
-      PageButton: 'PAGE ',
-    }
     const newWidget = {
       id: Date.now(),
       type: templateType,
       x: nx, y: ny, w: tmpl.w, h: tmpl.h,
-      label: (labels[templateType] || '') + count,
-      osc_addr: templateType === 'Button'      ? `/esp32/button/${count}`
-               : templateType === 'Toggle'     ? `/esp32/toggle/${count}`
-               : templateType === 'Slider'     ? `/esp32/slider/${count}`
-               : templateType === 'HSlider'    ? `/esp32/hslider/${count}`
-               : '',
+      label: nextUniqueLabel(pages, templateType),
+      osc_addr: nextUniqueOscAddr(pages, templateType),
     }
     if (templateType === 'Slider' || templateType === 'HSlider') newWidget.default = 127
     if (templateType === 'Toggle') newWidget.default = 0
@@ -340,7 +333,14 @@ export default function App() {
 
   // History-recording versions (Properties panel)
   const onUpdate = useCallback((id, changes) => {
-    updatePage(prev => prev.map(w => w.id === id ? { ...w, ...changes } : w))
+    updatePage(prev => prev.map((w) => {
+      if (w.id !== id) return w
+      const next = { ...w, ...changes }
+      if ('color' in changes && (changes.color == null || changes.color === '')) {
+        delete next.color
+      }
+      return next
+    }))
   }, [updatePage])
 
   const onUpdateMany = useCallback((updaterFn) => {
@@ -426,12 +426,15 @@ export default function App() {
       if (mod && e.key === 'v' && clipboard.length > 0) {
         e.preventDefault()
         const base = Date.now()
-        const pasted = clipboard.map((w, i) => ({
-          ...w,
-          id: base + i,
-          x: Math.min(screenW - w.w, w.x + 10),
-          y: Math.min(screenH - STATUS_BAR_H - w.h, w.y + 10),
-        }))
+        const pasted = uniquifyWidgets(
+          pagesRef.current,
+          clipboard.map((w, i) => ({
+            ...w,
+            id: base + i,
+            x: Math.min(screenW - w.w, w.x + 10),
+            y: Math.min(screenH - STATUS_BAR_H - w.h, w.y + 10),
+          })),
+        )
         updatePage(prev => [...prev, ...pasted])
         setSelectedIds(pasted.map(w => w.id))
       }
@@ -450,7 +453,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>ESP32 UI Layout Editor <span className="app-version">v0.3.7</span></h1>
+        <h1>ESP32 UI Layout Editor <span className="app-version">v0.5.0</span></h1>
         <div className="header-actions">
           <ExportButton
             pages={pagesState.value}
@@ -468,6 +471,69 @@ export default function App() {
       <div className="app-body">
         <WidgetPanel onDrop={onAddWidget} />
         <div className="canvas-area-shell">
+        <div className="canvas-overlay-toolbar">
+          <button
+            className={`canvas-tool-btn ${pagesState.canUndo ? '' : 'disabled'}`}
+            onClick={pagesState.undo}
+            title="Undo (Cmd+Z)"
+          >↩ Undo</button>
+          <button
+            className={`canvas-tool-btn ${pagesState.canRedo ? '' : 'disabled'}`}
+            onClick={pagesState.redo}
+            title="Redo (Cmd+Shift+Z)"
+          >Redo ↪</button>
+          <div className="canvas-toolbar-sep" />
+          <div className="canvas-rotation-group" title="回転">
+            <button
+              type="button"
+              className="canvas-tool-btn canvas-rot-btn"
+              onClick={() => setRotationDeg((d) => (d + 90) % 360)}
+              title="左回転"
+              aria-label="左回転"
+            >↶</button>
+            <span className="canvas-rot-deg">{rotationDeg}°</span>
+            <button
+              type="button"
+              className="canvas-tool-btn canvas-rot-btn"
+              onClick={() => setRotationDeg((d) => (d + 270) % 360)}
+              title="右回転"
+              aria-label="右回転"
+            >↷</button>
+          </div>
+          <button
+            className={`canvas-tool-btn ${showGrid ? 'active' : ''}`}
+            onClick={() => setShowGrid(prev => !prev)}
+            title="グリッド表示"
+          >Grid</button>
+          <button
+            className={`canvas-tool-btn ${snapToGrid ? 'active' : ''}`}
+            onClick={() => setSnapToGrid(prev => !prev)}
+            title="スナップ"
+          >Snap</button>
+          <div className="canvas-toolbar-sep" />
+          <div className="canvas-zoom-group" title="ズーム (Ctrl/⌘ + ホイール)">
+            <button
+              type="button"
+              className="canvas-tool-btn"
+              onClick={() => applyZoom(zoom - ZOOM_STEP)}
+              disabled={zoom <= ZOOM_MIN}
+              title="縮小"
+            >−</button>
+            <button
+              type="button"
+              className="canvas-tool-btn canvas-zoom-pct"
+              onClick={() => applyZoom(1)}
+              title="100% に戻す"
+            >{Math.round(zoom * 100)}%</button>
+            <button
+              type="button"
+              className="canvas-tool-btn"
+              onClick={() => applyZoom(zoom + ZOOM_STEP)}
+              disabled={zoom >= ZOOM_MAX}
+              title="拡大"
+            >+</button>
+          </div>
+        </div>
         <div
           className="canvas-area"
           ref={canvasAreaRef}
@@ -476,70 +542,6 @@ export default function App() {
           onPointerUp={endPan}
           onPointerCancel={endPan}
         >
-          <div className="canvas-overlay-toolbar">
-            <button
-              className={`canvas-tool-btn ${pagesState.canUndo ? '' : 'disabled'}`}
-              onClick={pagesState.undo}
-              title="Undo (Cmd+Z)"
-            >↩ Undo</button>
-            <button
-              className={`canvas-tool-btn ${pagesState.canRedo ? '' : 'disabled'}`}
-              onClick={pagesState.redo}
-              title="Redo (Cmd+Shift+Z)"
-            >Redo ↪</button>
-            <div className="canvas-toolbar-sep" />
-            <div className="canvas-rotation-group" title="回転">
-              <button
-                type="button"
-                className="canvas-tool-btn canvas-rot-btn"
-                onClick={() => setRotationDeg((d) => (d + 90) % 360)}
-                title="左回転"
-                aria-label="左回転"
-              >↶</button>
-              <span className="canvas-rot-deg">{rotationDeg}°</span>
-              <button
-                type="button"
-                className="canvas-tool-btn canvas-rot-btn"
-                onClick={() => setRotationDeg((d) => (d + 270) % 360)}
-                title="右回転"
-                aria-label="右回転"
-              >↷</button>
-            </div>
-            <button
-              className={`canvas-tool-btn ${showGrid ? 'active' : ''}`}
-              onClick={() => setShowGrid(prev => !prev)}
-              title="グリッド表示"
-            >Grid</button>
-            <button
-              className={`canvas-tool-btn ${snapToGrid ? 'active' : ''}`}
-              onClick={() => setSnapToGrid(prev => !prev)}
-              title="スナップ"
-            >Snap</button>
-            <div className="canvas-toolbar-sep" />
-            <div className="canvas-zoom-group" title="ズーム (Ctrl/⌘ + ホイール)">
-              <button
-                type="button"
-                className="canvas-tool-btn"
-                onClick={() => applyZoom(zoom - ZOOM_STEP)}
-                disabled={zoom <= ZOOM_MIN}
-                title="縮小"
-              >−</button>
-              <button
-                type="button"
-                className="canvas-tool-btn canvas-zoom-pct"
-                onClick={() => applyZoom(1)}
-                title="100% に戻す"
-              >{Math.round(zoom * 100)}%</button>
-              <button
-                type="button"
-                className="canvas-tool-btn"
-                onClick={() => applyZoom(zoom + ZOOM_STEP)}
-                disabled={zoom >= ZOOM_MAX}
-                title="拡大"
-              >+</button>
-            </div>
-          </div>
-
           <div
             className="pages-zoom-spacer"
             style={{ width: zoomW, height: zoomH }}
@@ -585,7 +587,7 @@ export default function App() {
                         showGrid={showGrid}
                         snapToGrid={snapToGrid}
                         rotationDeg={rotationDeg}
-                        appVersion="0.3.7"
+                        appVersion="0.5.0"
                         showPortLabels
                         pageIdx={idx}
                         scale={BASE_SCALE}
@@ -630,6 +632,7 @@ export default function App() {
             widget={selectedWidget}
             selectedIds={selectedIds}
             widgets={widgets}
+            pages={pagesState.value}
             pageCount={pageCount}
             onUpdate={onUpdate}
             onUpdateMany={onUpdateMany}

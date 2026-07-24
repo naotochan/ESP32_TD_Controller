@@ -6,9 +6,15 @@ const NEEDS_OSC = new Set(['Button', 'Toggle', 'Slider', 'HSlider'])
 function validateLayout(pages) {
   const warnings = []
   const addrMap = new Map() // addr → [{page, label, type}]
+  const labelMap = new Map() // label → [{page, type}]
 
   pages.forEach((pageWidgets, pageIdx) => {
     ;(pageWidgets || []).forEach((w) => {
+      const label = (w.label || '').trim()
+      if (label) {
+        if (!labelMap.has(label)) labelMap.set(label, [])
+        labelMap.get(label).push({ page: pageIdx + 1, type: w.type })
+      }
       if (NEEDS_OSC.has(w.type)) {
         const addr = (w.osc_addr || '').trim()
         if (!addr) {
@@ -28,6 +34,13 @@ function validateLayout(pages) {
       }
     })
   })
+
+  for (const [label, list] of labelMap) {
+    if (list.length > 1) {
+      const where = list.map((x) => `P${x.page}:${x.type}`).join(', ')
+      warnings.push(`ラベル重複「${label}」: ${where}`)
+    }
+  }
 
   for (const [addr, list] of addrMap) {
     if (list.length > 1) {

@@ -1,3 +1,14 @@
+import { collectUsedNames } from './uniqueNames'
+
+/** Fallback swatch when widget.color is unset (matches editor CSS defaults). */
+const DEFAULT_COLOR_BY_TYPE = {
+  Button: '#3a5080',
+  Toggle: '#1a5c42',
+  PageButton: '#1e3a2e',
+  Slider: '#64b4ff',
+  HSlider: '#64b4ff',
+}
+
 function AlignIcon({ type }) {
   const s = { display: 'block', pointerEvents: 'none' }
   if (type === 'left') return (
@@ -159,7 +170,7 @@ function AlignPanel({ selectedIds, widgets, onUpdateMany }) {
   )
 }
 
-export default function Properties({ widget, selectedIds, widgets, pageCount = 1, onUpdate, onUpdateMany, onDelete }) {
+export default function Properties({ widget, selectedIds, widgets, pages = [], pageCount = 1, onUpdate, onUpdateMany, onDelete }) {
   if (selectedIds.length > 1) {
     return (
       <AlignPanel
@@ -180,8 +191,14 @@ export default function Properties({ widget, selectedIds, widgets, pageCount = 1
     )
   }
 
-  const field = (label, key, type = 'text') => (
-    <div className="prop-field">
+  const used = collectUsedNames(pages, widget.id)
+  const labelDup = (widget.label || '').trim() !== '' && used.labels.has((widget.label || '').trim())
+  const oscDup = widget.type !== 'PageButton'
+    && (widget.osc_addr || '').trim() !== ''
+    && used.oscAddrs.has((widget.osc_addr || '').trim())
+
+  const field = (label, key, type = 'text', opts = {}) => (
+    <div className={`prop-field${opts.dup ? ' prop-field-dup' : ''}`}>
       <label>{label}</label>
       {type === 'number' ? (
         <input
@@ -194,8 +211,10 @@ export default function Properties({ widget, selectedIds, widgets, pageCount = 1
           type="text"
           value={widget[key] ?? ''}
           onChange={(e) => onUpdate(widget.id, { [key]: e.target.value })}
+          aria-invalid={opts.dup || undefined}
         />
       )}
+      {opts.dup && <p className="prop-dup-hint">他のウィジェットと重複しています（全ページ共通）</p>}
     </div>
   )
 
@@ -204,8 +223,30 @@ export default function Properties({ widget, selectedIds, widgets, pageCount = 1
   return (
     <div className="properties-panel">
       <h3>{widget.type}</h3>
-      {field('Label', 'label')}
-      {widget.type !== 'PageButton' && field('OSC Address', 'osc_addr')}
+      {field('Label', 'label', 'text', { dup: labelDup })}
+      {widget.type !== 'PageButton' && field('OSC Address', 'osc_addr', 'text', { dup: oscDup })}
+      <div className="prop-field">
+        <label>Color</label>
+        <div className="color-row">
+          <input
+            type="color"
+            className="color-input"
+            value={widget.color || DEFAULT_COLOR_BY_TYPE[widget.type] || '#3a5080'}
+            onChange={(e) => onUpdate(widget.id, { color: e.target.value })}
+            title="ウィジェット色"
+          />
+          <span className="color-hex">
+            {widget.color || 'デフォルト'}
+          </span>
+          <button
+            type="button"
+            className="color-reset-btn"
+            disabled={!widget.color}
+            onClick={() => onUpdate(widget.id, { color: null })}
+            title="タイプ標準色に戻す"
+          >デフォルト</button>
+        </div>
+      </div>
       {widget.type === 'PageButton' && (
         <>
           <div className="prop-field">

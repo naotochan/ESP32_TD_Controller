@@ -26,7 +26,7 @@ export default function Canvas({
   widgets, selectedIds, onSelect, onSelectMany,
   onUpdate, onUpdateMany, onAddWidget, onCommitDrag, onGetSnapshot,
   screenW, screenH, showGrid, snapToGrid = true,
-  rotationDeg = 0, appVersion = '0.3.7', showPortLabels = true,
+  rotationDeg = 0, appVersion = '0.5.0', showPortLabels = true,
   pageIdx = 0, scale = BASE_SCALE,
 }) {
   const usableH = screenH - STATUS_BAR_H
@@ -391,11 +391,14 @@ function WidgetView({ widget, isSelected, onPointerDown, scale, pageIdx = 0 }) {
     height: widget.h * scale,
   }
 
+  const custom = widget.color || null
+
   if (widget.type === 'Button') {
+    const btnStyle = custom ? { ...style, background: custom } : style
     return (
       <div
         className={`canvas-widget canvas-widget-button ${isSelected ? 'selected' : ''}`}
-        style={style}
+        style={btnStyle}
         onPointerDown={(e) => onPointerDown(e, widget.id, 'move')}
       >
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tl" />
@@ -409,15 +412,25 @@ function WidgetView({ widget, isSelected, onPointerDown, scale, pageIdx = 0 }) {
 
   if (widget.type === 'Toggle') {
     const isOn = !!widget.default
+    const togStyle = custom
+      ? {
+          ...style,
+          background: isOn ? lightenHex(custom, 28) : darkenHex(custom, 28),
+          boxShadow: isOn ? `inset 0 0 0 2px ${lightenHex(custom, 90)}` : 'none',
+        }
+      : style
     return (
       <div
         className={`canvas-widget canvas-widget-toggle ${isOn ? 'toggle-on' : ''} ${isSelected ? 'selected' : ''}`}
-        style={style}
+        style={togStyle}
         onPointerDown={(e) => onPointerDown(e, widget.id, 'move')}
       >
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tr" />
-        <span className="toggle-indicator" />
+        <span
+          className="toggle-indicator"
+          style={custom ? { background: lightenHex(custom, 80) } : undefined}
+        />
         <span className="widget-label">{widget.label || 'TOG'}</span>
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="bl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="br" />
@@ -434,7 +447,10 @@ function WidgetView({ widget, isSelected, onPointerDown, scale, pageIdx = 0 }) {
       >
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tr" />
-        <div className="slider-track" />
+        <div
+          className="slider-track"
+          style={custom ? { background: custom } : undefined}
+        />
         <span className="widget-label">{widget.label || 'SLIDER'}</span>
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="bl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="br" />
@@ -451,7 +467,10 @@ function WidgetView({ widget, isSelected, onPointerDown, scale, pageIdx = 0 }) {
       >
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tr" />
-        <div className="hslider-track" />
+        <div
+          className="hslider-track"
+          style={custom ? { background: custom } : undefined}
+        />
         <span className="widget-label">{widget.label || 'HSLIDER'}</span>
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="bl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="br" />
@@ -464,10 +483,11 @@ function WidgetView({ widget, isSelected, onPointerDown, scale, pageIdx = 0 }) {
     const defaultLabel = navMode === 'prev' ? '◀ PREV'
                        : navMode === 'next' ? 'NEXT ▶'
                        : `▶ P${(widget.target_page ?? 0) + 1}`
+    const pageStyle = custom ? { ...style, background: custom } : style
     return (
       <div
         className={`canvas-widget canvas-widget-pagebutton ${isSelected ? 'selected' : ''}`}
-        style={style}
+        style={pageStyle}
         data-page-link="1"
         data-widget-id={widget.id}
         data-page-idx={pageIdx}
@@ -475,7 +495,10 @@ function WidgetView({ widget, isSelected, onPointerDown, scale, pageIdx = 0 }) {
       >
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tr" />
-        <span className="widget-label pagebutton-label">{widget.label || defaultLabel}</span>
+        <span
+          className="widget-label pagebutton-label"
+          style={custom ? { color: lightenHex(custom, 120) } : undefined}
+        >{widget.label || defaultLabel}</span>
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="bl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="br" />
       </div>
@@ -483,6 +506,32 @@ function WidgetView({ widget, isSelected, onPointerDown, scale, pageIdx = 0 }) {
   }
 
   return null
+}
+
+function parseHex(hex) {
+  if (!hex || typeof hex !== 'string') return null
+  const s = hex.startsWith('#') ? hex.slice(1) : hex
+  if (s.length !== 6) return null
+  const n = Number.parseInt(s, 16)
+  if (Number.isNaN(n)) return null
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+function formatHex(r, g, b) {
+  const h = (v) => Math.max(0, Math.min(255, v | 0)).toString(16).padStart(2, '0')
+  return `#${h(r)}${h(g)}${h(b)}`
+}
+
+function lightenHex(hex, amount = 40) {
+  const rgb = parseHex(hex)
+  if (!rgb) return hex
+  return formatHex(rgb[0] + amount, rgb[1] + amount, rgb[2] + amount)
+}
+
+function darkenHex(hex, amount = 40) {
+  const rgb = parseHex(hex)
+  if (!rgb) return hex
+  return formatHex(rgb[0] - amount, rgb[1] - amount, rgb[2] - amount)
 }
 
 function ResizeHandle({ widgetId, onPointerDown, corner = 'br' }) {
