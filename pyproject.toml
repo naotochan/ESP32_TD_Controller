@@ -1,6 +1,6 @@
 [project]
 name = "esp32-td-controller"
-version = "0.5.0"
+version = "0.5.1"
 description = "ESP32-2432S028R (CYD) OSC controller for TouchDesigner"
 requires-python = ">=3.10"
 dependencies = [

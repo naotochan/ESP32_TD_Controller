@@ -26,7 +26,7 @@ export default function Canvas({
   widgets, selectedIds, onSelect, onSelectMany,
   onUpdate, onUpdateMany, onAddWidget, onCommitDrag, onGetSnapshot,
   screenW, screenH, showGrid, snapToGrid = true,
-  rotationDeg = 0, appVersion = '0.5.0', showPortLabels = true,
+  rotationDeg = 0, appVersion = '0.5.1', showPortLabels = true,
   pageIdx = 0, scale = BASE_SCALE,
 }) {
   const usableH = screenH - STATUS_BAR_H

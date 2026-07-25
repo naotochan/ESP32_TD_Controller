@@ -29,11 +29,28 @@ const ROTATION_STORAGE_KEY = 'esp32-td-rotation-deg'
 const ZOOM_STORAGE_KEY = 'esp32-td-editor-zoom'
 const ZOOM_MIN = 0.5
 const ZOOM_MAX = 2
-const ZOOM_STEP = 0.1
+const ZOOM_STEP = 0.05
+/** Wheel/trackpad pinch: pixel delta → zoom (macOS pinch arrives as ctrl+wheel) */
+const ZOOM_WHEEL_FACTOR = 0.0015
 
 function clampZoom(z) {
-  const n = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) * 10) / 10
+  // 1% precision so pinch/trackpad deltas aren't swallowed; ± buttons still use ZOOM_STEP (5%)
+  const n = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) * 100) / 100
   return n
+}
+
+/** Cursor offset inside the scrollable content box (accounts for border + padding). */
+function scrollLocalFromClient(el, clientX, clientY) {
+  const rect = el.getBoundingClientRect()
+  const cs = getComputedStyle(el)
+  const padL = parseFloat(cs.paddingLeft) || 0
+  const padT = parseFloat(cs.paddingTop) || 0
+  const borderL = parseFloat(cs.borderLeftWidth) || 0
+  const borderT = parseFloat(cs.borderTopWidth) || 0
+  return {
+    mx: clientX - rect.left - borderL - padL,
+    my: clientY - rect.top - borderT - padT,
+  }
 }
 
 function loadStoredZoom() {
@@ -108,6 +125,10 @@ export default function App() {
   const panRef = useRef(null)
   const zoomRef = useRef(zoom)
   zoomRef.current = zoom
+  /** Last pointer over canvas — ± buttons zoom toward this */
+  const lastPointerRef = useRef(null)
+  /** Pending cursor-anchored scroll correction (survives React batching) */
+  const zoomAnchorRef = useRef(null)
 
   const pageCount = pagesState.value.length
 
@@ -128,30 +149,57 @@ export default function App() {
     return () => ro.disconnect()
   }, [pageCount, rotationDeg, screenW, screenH])
 
+  // Keep the pre-zoom content point under the cursor after spacer size updates
+  useLayoutEffect(() => {
+    const el = canvasAreaRef.current
+    const anchor = zoomAnchorRef.current
+    if (!el || !anchor) return
+    zoomAnchorRef.current = null
+    el.scrollLeft = anchor.ux * zoom - anchor.mx
+    el.scrollTop = anchor.uy * zoom - anchor.my
+  }, [zoom])
+
   const applyZoom = useCallback((nextZoom, anchor) => {
     const el = canvasAreaRef.current
     const oldZoom = zoomRef.current
     const newZoom = clampZoom(nextZoom)
     if (newZoom === oldZoom) return
-    if (el && anchor) {
+
+    let point = anchor ?? lastPointerRef.current
+    if (!point && el) {
       const rect = el.getBoundingClientRect()
-      const mx = anchor.clientX - rect.left
-      const my = anchor.clientY - rect.top
-      const ratio = newZoom / oldZoom
-      setZoom(newZoom)
-      requestAnimationFrame(() => {
-        el.scrollLeft = (el.scrollLeft + mx) * ratio - mx
-        el.scrollTop = (el.scrollTop + my) * ratio - my
-      })
-    } else {
-      setZoom(newZoom)
+      point = { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }
     }
+
+    if (el && point) {
+      const { mx, my } = scrollLocalFromClient(el, point.clientX, point.clientY)
+      const pending = zoomAnchorRef.current
+      if (pending) {
+        // Batched pinch: keep unscaled content point, refresh cursor offset
+        pending.mx = mx
+        pending.my = my
+      } else {
+        zoomAnchorRef.current = {
+          mx,
+          my,
+          ux: (el.scrollLeft + mx) / oldZoom,
+          uy: (el.scrollTop + my) / oldZoom,
+        }
+      }
+    } else {
+      zoomAnchorRef.current = null
+    }
+
+    zoomRef.current = newZoom
+    setZoom(newZoom)
   }, [])
 
   const onCanvasAreaWheel = useCallback((e) => {
     if (!(e.ctrlKey || e.metaKey)) return
     e.preventDefault()
-    const step = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP
+    lastPointerRef.current = { clientX: e.clientX, clientY: e.clientY }
+    const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY
+    const step = -dy * ZOOM_WHEEL_FACTOR
     applyZoom(zoomRef.current + step, { clientX: e.clientX, clientY: e.clientY })
   }, [applyZoom])
 
@@ -164,6 +212,7 @@ export default function App() {
   }, [onCanvasAreaWheel])
 
   const onCanvasAreaPointerDown = useCallback((e) => {
+    lastPointerRef.current = { clientX: e.clientX, clientY: e.clientY }
     if (e.button !== 0) return
     // Pan only when starting on empty chrome (not pages, toolbar, buttons)
     if (e.target.closest('.page-slot, .canvas-overlay-toolbar, button, a, input, select, textarea')) {
@@ -184,6 +233,7 @@ export default function App() {
   }, [])
 
   const onCanvasAreaPointerMove = useCallback((e) => {
+    lastPointerRef.current = { clientX: e.clientX, clientY: e.clientY }
     const pan = panRef.current
     if (!pan || pan.pointerId !== e.pointerId) return
     const el = canvasAreaRef.current
@@ -453,7 +503,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>ESP32 UI Layout Editor <span className="app-version">v0.5.0</span></h1>
+        <h1>ESP32 UI Layout Editor <span className="app-version">v0.5.1</span></h1>
         <div className="header-actions">
           <ExportButton
             pages={pagesState.value}
@@ -587,7 +637,7 @@ export default function App() {
                         showGrid={showGrid}
                         snapToGrid={snapToGrid}
                         rotationDeg={rotationDeg}
-                        appVersion="0.5.0"
+                        appVersion="0.5.1"
                         showPortLabels
                         pageIdx={idx}
                         scale={BASE_SCALE}

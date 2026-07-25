@@ -1,5 +1,5 @@
 """ESP32 TD Controller - main entry point."""
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 # Reserved footer height (IP left + version right). Always at bottom of current rotation.
 STATUS_H = 14
