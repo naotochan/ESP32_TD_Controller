@@ -8,6 +8,11 @@ import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 PORT = 3737
+# Only the Vite dev server may drive a deploy. CORS response headers alone do not
+# stop a simple text/plain POST from any site, so requests are checked on arrival.
+ALLOWED_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
+ALLOWED_HOSTS = ("localhost", "127.0.0.1")
+MAX_BODY = 1 << 20  # 1 MiB
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MPREMOTE = os.path.join(SCRIPT_DIR, ".venv", "bin", "mpremote")
 LAYOUT_FILE = os.path.join(SCRIPT_DIR, "layout.json")
@@ -68,11 +73,30 @@ class Handler(BaseHTTPRequestHandler):
         print(fmt % args)
 
     def _cors(self):
-        self.send_header("Access-Control-Allow-Origin", "http://localhost:5173")
+        origin = self.headers.get("Origin")
+        self.send_header(
+            "Access-Control-Allow-Origin",
+            origin if origin in ALLOWED_ORIGINS else ALLOWED_ORIGINS[0],
+        )
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
+    def _origin_allowed(self):
+        """Reject cross-site requests and DNS-rebinding (Host must be loopback).
+
+        A missing Origin means a non-browser client (curl, scripts) — allowed,
+        since browsers always attach one to cross-origin requests.
+        """
+        host = self.headers.get("Host", "").rsplit(":", 1)[0].strip("[]")
+        if host not in ALLOWED_HOSTS:
+            return False
+        origin = self.headers.get("Origin")
+        return origin is None or origin in ALLOWED_ORIGINS
+
     def do_GET(self):
+        if not self._origin_allowed():
+            self._respond(403, "Forbidden origin")
+            return
         if self.path != "/status":
             self.send_response(404)
             self.end_headers()
@@ -92,28 +116,43 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_OPTIONS(self):
+        if not self._origin_allowed():
+            self._respond(403, "Forbidden origin")
+            return
         self.send_response(204)
         self._cors()
         self.end_headers()
 
     def do_POST(self):
+        if not self._origin_allowed():
+            self._respond(403, "Forbidden origin")
+            return
         if self.path != "/deploy":
             self.send_response(404)
             self.end_headers()
             return
 
-        length = int(self.headers.get("Content-Length", 0))
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            self._respond(400, "Invalid Content-Length")
+            return
+        if length < 0 or length > MAX_BODY:
+            self._respond(413, "Payload too large")
+            return
         body = self.rfile.read(length)
 
         try:
             data = json.loads(body)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             self._respond(400, "Invalid JSON")
             return
+        if not isinstance(data, dict) or not isinstance(data.get("pages"), list):
+            self._respond(400, "Invalid layout: expected an object with a 'pages' array")
+            return
 
-        with open(LAYOUT_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-
+        # Check the port before touching layout.json, so a failed deploy leaves
+        # the last known-good layout on disk.
         esp_port, ports, ambiguous = select_port()
         if not ports:
             self._respond(503, "ESP32 not found. Connect via USB.")
@@ -127,6 +166,9 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        with open(LAYOUT_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+
         try:
             result = subprocess.run(
                 [MPREMOTE, "connect", esp_port,
@@ -137,6 +179,9 @@ class Handler(BaseHTTPRequestHandler):
             )
         except subprocess.TimeoutExpired:
             self._respond(504, "mpremote timed out — check USB connection")
+            return
+        except FileNotFoundError:
+            self._respond(500, f"mpremote not found at {MPREMOTE} — run 'uv sync' first")
             return
 
         if result.returncode == 0:

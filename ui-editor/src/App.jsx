@@ -15,7 +15,7 @@ function screenSizeForRotation(deg) {
 }
 
 /** Normalize loaded layout rotation → degrees 0|90|180|270. */
-export function normalizeRotationDeg(data) {
+function normalizeRotationDeg(data) {
   if (data && data.rotation != null) {
     const r = Number(data.rotation)
     if (r === 90 || r === 180 || r === 270) return r
@@ -27,6 +27,9 @@ export function normalizeRotationDeg(data) {
 
 const ROTATION_STORAGE_KEY = 'esp32-td-rotation-deg'
 const ZOOM_STORAGE_KEY = 'esp32-td-editor-zoom'
+const LAYOUT_STORAGE_KEY = 'esp32-td-editor-layout'
+/** Debounce for layout autosave — drags fire updates continuously. */
+const AUTOSAVE_DELAY_MS = 300
 const ZOOM_MIN = 0.5
 const ZOOM_MAX = 2
 const ZOOM_STEP = 0.05
@@ -65,6 +68,20 @@ function loadStoredZoom() {
   }
 }
 
+/** Restore the work-in-progress layout so a reload doesn't discard it. */
+function loadStoredLayout() {
+  try {
+    const raw = localStorage.getItem(LAYOUT_STORAGE_KEY)
+    if (!raw) return null
+    const data = JSON.parse(raw)
+    if (!Array.isArray(data?.pages) || data.pages.length === 0) return null
+    if (!data.pages.every(Array.isArray)) return null
+    return data
+  } catch {
+    return null
+  }
+}
+
 function loadStoredRotationDeg() {
   try {
     const raw = localStorage.getItem(ROTATION_STORAGE_KEY)
@@ -94,12 +111,15 @@ const WIDGET_TEMPLATES = {
 }
 
 export default function App() {
+  const [restored] = useState(loadStoredLayout)
   // pagesState holds [[widget, ...], [widget, ...], ...] — one array per page
-  const pagesState = useUndoableState([[]])
+  const pagesState = useUndoableState(restored?.pages ?? [[]])
   const [currentPage, setCurrentPage] = useState(0)
   const [selectedIds, setSelectedIds] = useState([])
   const [clipboard, setClipboard] = useState([])
-  const [rotationDeg, setRotationDeg] = useState(loadStoredRotationDeg)
+  const [rotationDeg, setRotationDeg] = useState(
+    () => (restored ? normalizeRotationDeg(restored) : loadStoredRotationDeg()),
+  )
   const [showGrid, setShowGrid] = useState(true)
   const [snapToGrid, setSnapToGrid] = useState(true)
   const [zoom, setZoom] = useState(loadStoredZoom)
@@ -115,16 +135,33 @@ export default function App() {
     try { localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom)) } catch { /* ignore */ }
   }, [zoom])
 
-  // Stable refs so callbacks always read the latest values without deps
+  // Autosave the layout — the editor is the only copy until Save / Deploy
+  useEffect(() => {
+    const id = setTimeout(() => {
+      try {
+        localStorage.setItem(
+          LAYOUT_STORAGE_KEY,
+          JSON.stringify({ rotation: rotationDeg, pages: pagesState.value }),
+        )
+      } catch { /* quota / private mode */ }
+    }, AUTOSAVE_DELAY_MS)
+    return () => clearTimeout(id)
+  }, [pagesState.value, rotationDeg])
+
+  // Stable refs so callbacks always read the latest values without deps.
+  // Written after commit (never during render) — every reader is an event handler.
   const currentPageRef = useRef(currentPage)
-  currentPageRef.current = currentPage
   const pagesRef = useRef(pagesState.value)
-  pagesRef.current = pagesState.value
+  const zoomRef = useRef(zoom)
+  useEffect(() => {
+    currentPageRef.current = currentPage
+    pagesRef.current = pagesState.value
+    zoomRef.current = zoom
+  }, [currentPage, pagesState.value, zoom])
+
   const pagesRowRef = useRef(null)
   const canvasAreaRef = useRef(null)
   const panRef = useRef(null)
-  const zoomRef = useRef(zoom)
-  zoomRef.current = zoom
   /** Last pointer over canvas — ± buttons zoom toward this */
   const lastPointerRef = useRef(null)
   /** Pending cursor-anchored scroll correction (survives React batching) */
@@ -254,39 +291,37 @@ export default function App() {
   }, [])
 
   const widgets = pagesState.value[currentPage] || []
+  // Stable setters — safe as individual callback deps
+  const { set: setPages, setSilent: setPagesSilent, pushToHistory: pushPagesHistory } = pagesState
 
   // --- Helpers: operate on a specific page (defaults to current) ---
   const updatePageAt = useCallback((pageIdx, updater) => {
-    pagesState.set(prev => {
+    setPages(prev => {
       const next = [...prev]
       next[pageIdx] = updater(next[pageIdx] || [])
       return next
     })
-  }, [pagesState.set])
+  }, [setPages])
 
   const updatePageAtSilent = useCallback((pageIdx, updater) => {
-    pagesState.setSilent(prev => {
+    setPagesSilent(prev => {
       const next = [...prev]
       next[pageIdx] = updater(next[pageIdx] || [])
       return next
     })
-  }, [pagesState.setSilent])
+  }, [setPagesSilent])
 
   const updatePage = useCallback((updater) => {
     updatePageAt(currentPageRef.current, updater)
   }, [updatePageAt])
 
-  const updatePageSilent = useCallback((updater) => {
-    updatePageAtSilent(currentPageRef.current, updater)
-  }, [updatePageAtSilent])
-
   // --- Page management ---
   const addPage = useCallback(() => {
     const newIdx = pagesRef.current.length
-    pagesState.set(prev => [...prev, []])
+    setPages(prev => [...prev, []])
     setCurrentPage(newIdx)
     setSelectedIds([])
-  }, [pagesState.set])
+  }, [setPages])
 
   const removePage = useCallback((idx) => {
     const len = pagesRef.current.length
@@ -298,7 +333,7 @@ export default function App() {
       )
       if (!ok) return
     }
-    pagesState.set(prev => {
+    setPages(prev => {
       const next = prev.filter((_, i) => i !== idx)
       // Remap PageButton targets after the removed index
       return next.map(pageWidgets =>
@@ -316,7 +351,7 @@ export default function App() {
       return Math.min(prev, len - 2)
     })
     setSelectedIds([])
-  }, [pagesState.set])
+  }, [setPages])
 
   const switchPage = useCallback((idx) => {
     if (idx === currentPageRef.current) return
@@ -377,10 +412,6 @@ export default function App() {
     setSelectedIds(ids)
   }, [])
 
-  const onSelectMany = useCallback((ids) => {
-    onSelectManyOnPage(currentPageRef.current, ids)
-  }, [onSelectManyOnPage])
-
   // History-recording versions (Properties panel)
   const onUpdate = useCallback((id, changes) => {
     updatePage(prev => prev.map((w) => {
@@ -409,8 +440,8 @@ export default function App() {
   // Canvas calls this to snapshot ALL pages at drag start, then commits on drag end
   const onGetSnapshot = useCallback(() => pagesRef.current, [])
   const onCommitDrag = useCallback((snapshot) => {
-    pagesState.pushToHistory(snapshot)
-  }, [pagesState.pushToHistory])
+    pushPagesHistory(snapshot)
+  }, [pushPagesHistory])
 
   const onReorder = useCallback((id, direction) => {
     updatePage(prev => {
@@ -509,7 +540,7 @@ export default function App() {
             pages={pagesState.value}
             rotationDeg={rotationDeg}
             onLoad={(data) => {
-              pagesState.set(() => data.pages)
+              setPages(() => data.pages)
               setRotationDeg(normalizeRotationDeg(data))
               setCurrentPage(0)
               setSelectedIds([])

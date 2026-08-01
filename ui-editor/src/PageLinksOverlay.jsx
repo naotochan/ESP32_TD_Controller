@@ -1,7 +1,7 @@
 import { useLayoutEffect, useState, useCallback } from 'react'
 
 /** Resolve PageButton → destination page index (or null / invalid). */
-export function resolvePageLinkTarget(widget, pageIdx, pageCount) {
+function resolvePageLinkTarget(widget, pageIdx, pageCount) {
   const mode = widget.nav_mode || 'goto'
   if (mode === 'prev') {
     return pageIdx > 0 ? { target: pageIdx - 1, invalid: false } : null
@@ -220,7 +220,7 @@ export default function PageLinksOverlay({
       window.removeEventListener('resize', measure)
       cancelAnimationFrame(t)
     }
-  }, [measure, revision, pages, selectedIds, currentPage])
+  }, [measure, containerRef, revision, pages, selectedIds, currentPage])
 
   if (size.w === 0 || paths.length === 0) return null
 

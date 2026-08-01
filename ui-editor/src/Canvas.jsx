@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 
 /** Default editor pixels per device pixel (fixed page footprint; view zoom is CSS). */
 export const BASE_SCALE = 2
@@ -52,21 +52,20 @@ export default function Canvas({
   const dragState = useRef(null)
   const dragSnapshotRef = useRef(null)
   const rubberBandRef = useRef(null)
+  /** AbortController for the document listeners of the interaction in flight. */
+  const dragListenersRef = useRef(null)
   const [rubberBandRect, setRubberBandRect] = useState(null)
 
-  // Stable refs so handlers with [] deps can access latest values
-  const widgetsRef = useRef(widgets)
-  widgetsRef.current = widgets
-  const selectedIdsRef = useRef(selectedIds)
-  selectedIdsRef.current = selectedIds
-  const onSelectManyRef = useRef(onSelectMany)
-  onSelectManyRef.current = onSelectMany
-  const onUpdateManyRef = useRef(onUpdateMany)
-  onUpdateManyRef.current = onUpdateMany
-  const onCommitDragRef = useRef(onCommitDrag)
-  onCommitDragRef.current = onCommitDrag
-  const onGetSnapshotRef = useRef(onGetSnapshot)
-  onGetSnapshotRef.current = onGetSnapshot
+  // Latest props for the document-level drag handlers, which keep [] deps so the
+  // listeners stay referentially stable (parent passes fresh callbacks every render).
+  // Written after commit, so rendering itself stays side-effect free.
+  const latest = useRef({})
+  useEffect(() => {
+    latest.current = {
+      widgets, selectedIds, onSelectMany, onUpdate, onUpdateMany,
+      onCommitDrag, onGetSnapshot, screenW, screenH, usableH, snapToGrid,
+    }
+  })
 
   // --- Drag-and-drop from WidgetPanel ---
   const handleDragOver = useCallback((e) => {
@@ -85,58 +84,13 @@ export default function Canvas({
     onAddWidget(widgetType, x, y)
   }, [onAddWidget, screenW, screenH])
 
-  // --- Widget pointer: start move or resize drag ---
-  const handlePointerDown = useCallback((e, widgetId, mode) => {
-    e.stopPropagation()
-    e.preventDefault()
-    const rect = canvasRef.current.getBoundingClientRect()
-    const { x: pointerX, y: pointerY } = clientToDevice(e.clientX, e.clientY, rect, screenW, screenH)
-    const additive = e.metaKey || e.ctrlKey
-
-    dragSnapshotRef.current = onGetSnapshotRef.current()
-
-    if (mode === 'move') {
-      // Group drag: if the dragged widget is part of the selection, move all selected
-      const isGrouped = selectedIdsRef.current.includes(widgetId)
-      const dragIds = isGrouped ? [...selectedIdsRef.current] : [widgetId]
-      const origPositions = {}
-      dragIds.forEach(id => {
-        const w = widgetsRef.current.find(w => w.id === id)
-        if (w) origPositions[id] = { x: w.x, y: w.y }
-      })
-      dragState.current = { mode: 'move', ids: dragIds, startX: pointerX, startY: pointerY, origPositions }
-    } else if (mode.startsWith('resize-')) {
-      const w = widgetsRef.current.find(w => w.id === widgetId)
-      dragState.current = { mode: 'resize', ids: [widgetId], startX: pointerX, startY: pointerY, origW: w.w, origH: w.h, origX: w.x, origY: w.y, corner: mode.slice('resize-'.length) }
-    }
-
-    onSelect(widgetId, additive)
-  }, [onSelect, screenW, screenH])
-
-  // --- Canvas background: just deselect (rubber band handled by container) ---
-  const onCanvasPointerDown = useCallback((e) => {
-    if (e.metaKey || e.ctrlKey) return
-    onSelect(null)
-    // event bubbles up to container which starts the rubber band
-  }, [onSelect])
-
-  // --- Container pointer: start rubber band (works from inside and outside canvas) ---
-  const onContainerPointerDown = useCallback((e) => {
-    if (e.metaKey || e.ctrlKey) return
-    const rect = canvasRef.current.getBoundingClientRect()
-    // Clamp start point to canvas coordinate space (can start from outside edge)
-    const { x: rawX, y: rawY } = clientToDevice(e.clientX, e.clientY, rect, screenW, screenH)
-    const x = Math.max(0, Math.min(screenW, rawX))
-    const y = Math.max(0, Math.min(screenH, rawY))
-    rubberBandRef.current = { startX: x, startY: y, currentX: x, currentY: y }
-    setRubberBandRect({ x, y, w: 0, h: 0 })
-  }, [screenW, screenH])
-
-  // --- Stable global handlers (no/minimal deps, read latest via refs) ---
+  // --- Stable global handlers ([] deps → same reference for add/removeEventListener) ---
   const handlePointerMove = useCallback((e) => {
+    if (!dragState.current && !rubberBandRef.current) return
     e.preventDefault()
     const rect = canvasRef.current?.getBoundingClientRect()
     if (!rect) return
+    const { onUpdate, onUpdateMany, widgets, screenW, screenH, usableH, snapToGrid } = latest.current
 
     if (dragState.current) {
       const state = dragState.current
@@ -147,7 +101,7 @@ export default function Canvas({
       if (state.mode === 'move') {
         const firstId = state.ids[0]
         const firstOrig = state.origPositions[firstId]
-        const firstW = widgetsRef.current.find(w => w.id === firstId)
+        const firstW = widgets.find(w => w.id === firstId)
         const clampW = firstW ? firstW.w : 10
         const clampH = firstW ? firstW.h : 10
 
@@ -168,18 +122,17 @@ export default function Canvas({
           const updates = {}
           state.ids.forEach(id => {
             const orig = state.origPositions[id]
-            const ww = widgetsRef.current.find(w => w.id === id)
+            const ww = widgets.find(w => w.id === id)
             if (orig && ww) updates[id] = {
               x: Math.max(0, Math.min(screenW - ww.w, orig.x + snapDx)),
               y: Math.max(0, Math.min(usableH - ww.h, orig.y + snapDy)),
             }
           })
-          onUpdateManyRef.current(prev =>
+          onUpdateMany(prev =>
             prev.map(w => w.id in updates ? { ...w, ...updates[w.id] } : w)
           )
         }
       } else if (state.mode === 'resize') {
-        const w = widgetsRef.current.find(w => w.id === state.ids[0])
         const corner = state.corner || 'br'
 
         let newX = state.origX
@@ -253,11 +206,18 @@ export default function Canvas({
         h: Math.abs(cy - startY),
       })
     }
-  }, [onUpdate, screenW, screenH, usableH, snapToGrid])
+  }, [])
+
+  /** Drops every listener from the current interaction in one shot. */
+  const detachGlobalListeners = useCallback(() => {
+    dragListenersRef.current?.abort()
+    dragListenersRef.current = null
+  }, [])
 
   const handlePointerUp = useCallback(() => {
+    const { widgets, onSelectMany, onCommitDrag } = latest.current
     if (dragState.current !== null && dragSnapshotRef.current !== null) {
-      onCommitDragRef.current?.(dragSnapshotRef.current)
+      onCommitDrag?.(dragSnapshotRef.current)
     }
     dragSnapshotRef.current = null
     dragState.current = null
@@ -271,27 +231,82 @@ export default function Canvas({
         h: Math.abs(currentY - startY),
       }
       if (rb.w > 3 || rb.h > 3) {
-        const hit = widgetsRef.current
+        const hit = widgets
           .filter(w =>
             w.x < rb.x + rb.w && w.x + w.w > rb.x &&
             w.y < rb.y + rb.h && w.y + w.h > rb.y
           )
           .map(w => w.id)
-        onSelectManyRef.current(hit)
+        onSelectMany(hit)
       }
       rubberBandRef.current = null
       setRubberBandRect(null)
     }
-  }, [])
 
-  // Attach/detach global listeners while interacting
-  if (dragState.current || rubberBandRef.current) {
-    document.addEventListener('pointermove', handlePointerMove, { passive: false })
-    document.addEventListener('pointerup', handlePointerUp)
-  } else {
-    document.removeEventListener('pointermove', handlePointerMove)
-    document.removeEventListener('pointerup', handlePointerUp)
-  }
+    detachGlobalListeners()
+  }, [detachGlobalListeners])
+
+  /** Listen only while a drag/rubber-band is in flight. */
+  const attachGlobalListeners = useCallback(() => {
+    detachGlobalListeners()
+    const ac = new AbortController()
+    dragListenersRef.current = ac
+    document.addEventListener('pointermove', handlePointerMove, { passive: false, signal: ac.signal })
+    document.addEventListener('pointerup', handlePointerUp, { signal: ac.signal })
+    document.addEventListener('pointercancel', handlePointerUp, { signal: ac.signal })
+  }, [handlePointerMove, handlePointerUp, detachGlobalListeners])
+
+  // Safety net: never leave listeners behind if the page unmounts mid-drag
+  useEffect(() => detachGlobalListeners, [detachGlobalListeners])
+
+  // --- Widget pointer: start move or resize drag ---
+  const handlePointerDown = useCallback((e, widgetId, mode) => {
+    e.stopPropagation()
+    e.preventDefault()
+    const rect = canvasRef.current.getBoundingClientRect()
+    const { x: pointerX, y: pointerY } = clientToDevice(e.clientX, e.clientY, rect, screenW, screenH)
+    const additive = e.metaKey || e.ctrlKey
+
+    dragSnapshotRef.current = onGetSnapshot()
+
+    if (mode === 'move') {
+      // Group drag: if the dragged widget is part of the selection, move all selected
+      const isGrouped = selectedIds.includes(widgetId)
+      const dragIds = isGrouped ? [...selectedIds] : [widgetId]
+      const origPositions = {}
+      dragIds.forEach(id => {
+        const w = widgets.find(w => w.id === id)
+        if (w) origPositions[id] = { x: w.x, y: w.y }
+      })
+      dragState.current = { mode: 'move', ids: dragIds, startX: pointerX, startY: pointerY, origPositions }
+    } else if (mode.startsWith('resize-')) {
+      const w = widgets.find(w => w.id === widgetId)
+      dragState.current = { mode: 'resize', ids: [widgetId], startX: pointerX, startY: pointerY, origW: w.w, origH: w.h, origX: w.x, origY: w.y, corner: mode.slice('resize-'.length) }
+    }
+
+    attachGlobalListeners()
+    onSelect(widgetId, additive)
+  }, [onSelect, onGetSnapshot, selectedIds, widgets, screenW, screenH, attachGlobalListeners])
+
+  // --- Canvas background: just deselect (rubber band handled by container) ---
+  const onCanvasPointerDown = useCallback((e) => {
+    if (e.metaKey || e.ctrlKey) return
+    onSelect(null)
+    // event bubbles up to container which starts the rubber band
+  }, [onSelect])
+
+  // --- Container pointer: start rubber band (works from inside and outside canvas) ---
+  const onContainerPointerDown = useCallback((e) => {
+    if (e.metaKey || e.ctrlKey) return
+    const rect = canvasRef.current.getBoundingClientRect()
+    // Clamp start point to canvas coordinate space (can start from outside edge)
+    const { x: rawX, y: rawY } = clientToDevice(e.clientX, e.clientY, rect, screenW, screenH)
+    const x = Math.max(0, Math.min(screenW, rawX))
+    const y = Math.max(0, Math.min(screenH, rawY))
+    rubberBandRef.current = { startX: x, startY: y, currentX: x, currentY: y }
+    setRubberBandRect({ x, y, w: 0, h: 0 })
+    attachGlobalListeners()
+  }, [screenW, screenH, attachGlobalListeners])
 
   return (
     <div

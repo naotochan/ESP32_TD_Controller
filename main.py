@@ -294,6 +294,9 @@ draw_page(current_page)
 # --- Main loop ---
 _OSC_INTERVAL_MS = 20
 _last_osc = {}
+# Widget owning the current touch. Only it receives events until release, so
+# dragging across widgets can't leave a stale _touching behind on the one we left.
+_active = None
 
 try:
     while True:
@@ -304,8 +307,17 @@ try:
         pos = touch.get_pos()
         now = time.ticks_ms()
 
-        for w in all_pages[current_page]:
+        w = _active
+        if w is None and pos:
+            for cand in all_pages[current_page]:
+                if cand.hit(pos[0], pos[1]):
+                    w = _active = cand
+                    break
+
+        if w is not None:
             claimed = w.process(pos)
+            if pos is None:
+                _active = None
             if claimed:
                 if isinstance(w, PageButton) and not w._touching:
                     mode = getattr(w, 'nav_mode', 'goto')
@@ -330,7 +342,6 @@ try:
                             _safe_send(w.osc_addr, *msg)
                     if _widget_overlaps_status(w):
                         _draw_status()
-                break
 
         time.sleep_ms(10)
 except KeyboardInterrupt:
