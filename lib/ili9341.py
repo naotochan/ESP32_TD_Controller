@@ -120,10 +120,16 @@ class ILI9341:
         self.cs(1)
 
     def fill_rect(self, x, y, w, h, color):
-        if x >= self.width or y >= self.height or w <= 0 or h <= 0:
+        if w <= 0 or h <= 0:
             return
         x1 = min(x + w - 1, self.width - 1)
         y1 = min(y + h - 1, self.height - 1)
+        if x < 0:
+            x = 0
+        if y < 0:
+            y = 0
+        if x > x1 or y > y1:
+            return
         self._set_window(x, y, x1, y1)
         count = (x1 - x + 1) * (y1 - y + 1)
         c = bytes([(color >> 8) & 0xFF, color & 0xFF])
@@ -200,14 +206,13 @@ class ILI9341:
         buf = bytearray(row_bytes * (y1 - y0 + 1))
 
         cols = range(x0 - x, x1 - x + 1)
-        row = None
+        row = bytearray(row_bytes)
         last_font_row = -1
         pos = 0
         for sy in range(y0 - y, y1 - y + 1):
             font_row = sy // scale
             if font_row != last_font_row:
                 byte = bmp[font_row]
-                row = bytearray(row_bytes)
                 i = 0
                 for sx in cols:
                     c = fg if (byte >> (7 - sx // scale)) & 1 else bg
@@ -225,11 +230,13 @@ class ILI9341:
         if scale < 1:
             return
         size = 8 * scale
+        if y + size <= 0 or y >= self.height:
+            return
         fg = bytes([(color >> 8) & 0xFF, color & 0xFF])
         bgc = bytes([(bg >> 8) & 0xFF, bg & 0xFF])
         for ch in s.upper():
             if x >= self.width:
                 break
-            if x + size > 0 and 0 < y + size and y < self.height:
+            if x + size > 0:
                 self._draw_char(ch, x, y, fg, bgc, scale, size)
             x += size
