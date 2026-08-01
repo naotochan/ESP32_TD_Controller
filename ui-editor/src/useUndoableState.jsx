@@ -1,4 +1,5 @@
 import { useReducer, useCallback, useEffect } from 'react'
+import { isTextEntry } from './textEntry'
 
 const MAX_HISTORY = 50
 
@@ -26,8 +27,12 @@ function reducer(state, action) {
       if (value === state.value) return state
       return { ...state, value }
     }
-    // Commit a snapshot taken before a silent burst (e.g. a canvas drag)
+    // Commit a snapshot taken before a silent burst (e.g. a canvas drag).
+    // A click that starts and ends a drag without moving anything leaves the
+    // snapshot referentially identical — recording it would discard the redo
+    // stack and add an undo step that changes nothing.
     case 'pushToHistory':
+      if (action.snapshot === state.value) return state
       return { ...state, past: trim([...state.past, action.snapshot]), future: [] }
     case 'undo': {
       if (state.past.length === 0) return state
@@ -66,8 +71,7 @@ export default function useUndoableState(initialValue) {
   useEffect(() => {
     const handler = (e) => {
       // Text fields keep their own native undo stack
-      const t = e.target
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      if (isTextEntry(e.target)) return
       const mod = e.ctrlKey || e.metaKey
       if (!mod || (e.key !== 'z' && e.key !== 'Z')) return
       e.preventDefault()

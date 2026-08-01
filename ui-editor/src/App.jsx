@@ -8,6 +8,8 @@ import useUndoableState from './useUndoableState'
 import LayersPanel from './LayersPanel'
 import PageLinksOverlay from './PageLinksOverlay'
 import { nextUniqueLabel, nextUniqueOscAddr, uniquifyWidgets } from './uniqueNames'
+import { isTextEntry } from './textEntry'
+import { APP_VERSION } from './version'
 
 /** Screen size for rotation degrees 0/90/180/270 (CYD 240×320 panel). */
 function screenSizeForRotation(deg) {
@@ -68,16 +70,31 @@ function loadStoredZoom() {
   }
 }
 
-/** Restore the work-in-progress layout so a reload doesn't discard it. */
+function isRestorableWidget(w) {
+  return !!w && typeof w === 'object' && typeof w.type === 'string'
+    && Number.isFinite(w.x) && Number.isFinite(w.y)
+    && Number.isFinite(w.w) && Number.isFinite(w.h)
+}
+
+/**
+ * Restore the work-in-progress layout so a reload doesn't discard it.
+ * A corrupt entry is dropped rather than restored — rendering it would throw
+ * on every mount, leaving no way back into the editor.
+ */
 function loadStoredLayout() {
   try {
     const raw = localStorage.getItem(LAYOUT_STORAGE_KEY)
     if (!raw) return null
     const data = JSON.parse(raw)
-    if (!Array.isArray(data?.pages) || data.pages.length === 0) return null
-    if (!data.pages.every(Array.isArray)) return null
+    const usable = Array.isArray(data?.pages) && data.pages.length > 0
+      && data.pages.every(p => Array.isArray(p) && p.every(isRestorableWidget))
+    if (!usable) {
+      localStorage.removeItem(LAYOUT_STORAGE_KEY)
+      return null
+    }
     return data
   } catch {
+    try { localStorage.removeItem(LAYOUT_STORAGE_KEY) } catch { /* ignore */ }
     return null
   }
 }
@@ -149,11 +166,13 @@ export default function App() {
   }, [pagesState.value, rotationDeg])
 
   // Stable refs so callbacks always read the latest values without deps.
-  // Written after commit (never during render) — every reader is an event handler.
+  // Written in a layout effect: after commit (never during render), but before
+  // the browser can deliver the next event, so handlers never see a stale value.
+  // applyZoom also writes zoomRef directly so batched pinch deltas accumulate.
   const currentPageRef = useRef(currentPage)
   const pagesRef = useRef(pagesState.value)
   const zoomRef = useRef(zoom)
-  useEffect(() => {
+  useLayoutEffect(() => {
     currentPageRef.current = currentPage
     pagesRef.current = pagesState.value
     zoomRef.current = zoom
@@ -305,8 +324,13 @@ export default function App() {
 
   const updatePageAtSilent = useCallback((pageIdx, updater) => {
     setPagesSilent(prev => {
+      const page = prev[pageIdx] || []
+      const updated = updater(page)
+      // Keep the array identity when nothing changed, so a drag that moved
+      // nothing leaves the undo/redo stacks untouched
+      if (updated === page) return prev
       const next = [...prev]
-      next[pageIdx] = updater(next[pageIdx] || [])
+      next[pageIdx] = updated
       return next
     })
   }, [setPagesSilent])
@@ -463,7 +487,7 @@ export default function App() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+      if (isTextEntry(e.target)) return
 
       if (e.key === 'Escape') { setSelectedIds([]); return }
 
@@ -534,7 +558,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>ESP32 UI Layout Editor <span className="app-version">v0.5.1</span></h1>
+        <h1>ESP32 UI Layout Editor <span className="app-version">v{APP_VERSION}</span></h1>
         <div className="header-actions">
           <ExportButton
             pages={pagesState.value}
@@ -668,7 +692,6 @@ export default function App() {
                         showGrid={showGrid}
                         snapToGrid={snapToGrid}
                         rotationDeg={rotationDeg}
-                        appVersion="0.5.1"
                         showPortLabels
                         pageIdx={idx}
                         scale={BASE_SCALE}

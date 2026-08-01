@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { APP_VERSION } from './version'
 
 /** Default editor pixels per device pixel (fixed page footprint; view zoom is CSS). */
 export const BASE_SCALE = 2
@@ -26,7 +27,7 @@ export default function Canvas({
   widgets, selectedIds, onSelect, onSelectMany,
   onUpdate, onUpdateMany, onAddWidget, onCommitDrag, onGetSnapshot,
   screenW, screenH, showGrid, snapToGrid = true,
-  rotationDeg = 0, appVersion = '0.5.1', showPortLabels = true,
+  rotationDeg = 0, appVersion = APP_VERSION, showPortLabels = true,
   pageIdx = 0, scale = BASE_SCALE,
 }) {
   const usableH = screenH - STATUS_BAR_H
@@ -116,21 +117,27 @@ export default function Canvas({
         const snapDx = nx - firstOrig.x
         const snapDy = ny - firstOrig.y
 
+        // Emit nothing when the pointer hasn't moved anything — a click that
+        // starts and ends a drag in place must not touch state or history.
         if (state.ids.length === 1) {
-          onUpdate(firstId, { x: nx, y: ny })
+          if (firstW && (firstW.x !== nx || firstW.y !== ny)) {
+            onUpdate(firstId, { x: nx, y: ny })
+          }
         } else {
           const updates = {}
           state.ids.forEach(id => {
             const orig = state.origPositions[id]
             const ww = widgets.find(w => w.id === id)
-            if (orig && ww) updates[id] = {
-              x: Math.max(0, Math.min(screenW - ww.w, orig.x + snapDx)),
-              y: Math.max(0, Math.min(usableH - ww.h, orig.y + snapDy)),
-            }
+            if (!orig || !ww) return
+            const wx = Math.max(0, Math.min(screenW - ww.w, orig.x + snapDx))
+            const wy = Math.max(0, Math.min(usableH - ww.h, orig.y + snapDy))
+            if (ww.x !== wx || ww.y !== wy) updates[id] = { x: wx, y: wy }
           })
-          onUpdateMany(prev =>
-            prev.map(w => w.id in updates ? { ...w, ...updates[w.id] } : w)
-          )
+          if (Object.keys(updates).length > 0) {
+            onUpdateMany(prev =>
+              prev.map(w => w.id in updates ? { ...w, ...updates[w.id] } : w)
+            )
+          }
         }
       } else if (state.mode === 'resize') {
         const corner = state.corner || 'br'
@@ -188,7 +195,10 @@ export default function Canvas({
         newY = topEdge
         newH = bottomEdge - topEdge
 
-        onUpdate(state.ids[0], { x: newX, y: newY, w: newW, h: newH })
+        const cur = widgets.find(w => w.id === state.ids[0])
+        if (!cur || cur.x !== newX || cur.y !== newY || cur.w !== newW || cur.h !== newH) {
+          onUpdate(state.ids[0], { x: newX, y: newY, w: newW, h: newH })
+        }
       }
     }
 
@@ -261,6 +271,7 @@ export default function Canvas({
 
   // --- Widget pointer: start move or resize drag ---
   const handlePointerDown = useCallback((e, widgetId, mode) => {
+    if (e.button !== 0) return
     e.stopPropagation()
     e.preventDefault()
     const rect = canvasRef.current.getBoundingClientRect()
@@ -290,14 +301,14 @@ export default function Canvas({
 
   // --- Canvas background: just deselect (rubber band handled by container) ---
   const onCanvasPointerDown = useCallback((e) => {
-    if (e.metaKey || e.ctrlKey) return
+    if (e.button !== 0 || e.metaKey || e.ctrlKey) return
     onSelect(null)
     // event bubbles up to container which starts the rubber band
   }, [onSelect])
 
   // --- Container pointer: start rubber band (works from inside and outside canvas) ---
   const onContainerPointerDown = useCallback((e) => {
-    if (e.metaKey || e.ctrlKey) return
+    if (e.button !== 0 || e.metaKey || e.ctrlKey) return
     const rect = canvasRef.current.getBoundingClientRect()
     // Clamp start point to canvas coordinate space (can start from outside edge)
     const { x: rawX, y: rawY } = clientToDevice(e.clientX, e.clientY, rect, screenW, screenH)

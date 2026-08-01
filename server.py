@@ -6,13 +6,15 @@ import shutil
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlsplit
 
 PORT = 3737
-# Only the Vite dev server may drive a deploy. CORS response headers alone do not
+# Only a local dev server may drive a deploy. CORS response headers alone do not
 # stop a simple text/plain POST from any site, so requests are checked on arrival.
 ALLOWED_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
-ALLOWED_HOSTS = ("localhost", "127.0.0.1")
+ALLOWED_HOSTS = ("localhost", "127.0.0.1", "::1")
 MAX_BODY = 1 << 20  # 1 MiB
+WIDGET_TYPES = ("Button", "Toggle", "Slider", "HSlider", "PageButton")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MPREMOTE = os.path.join(SCRIPT_DIR, ".venv", "bin", "mpremote")
 LAYOUT_FILE = os.path.join(SCRIPT_DIR, "layout.json")
@@ -68,6 +70,28 @@ def find_port():
     return port
 
 
+def _validate_layout(data):
+    """Return a problem description, or None when the layout is safe to flash.
+
+    The device instantiates widgets at import time, so a malformed layout would
+    otherwise leave it stuck on a blank screen until the next USB deploy.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("pages"), list):
+        return "expected an object with a 'pages' array"
+    for i, page in enumerate(data["pages"]):
+        if not isinstance(page, list):
+            return f"page {i + 1} is not an array"
+        for w in page:
+            if not isinstance(w, dict):
+                return f"page {i + 1} contains a non-object widget"
+            if w.get("type") not in WIDGET_TYPES:
+                return f"page {i + 1} has unknown widget type {w.get('type')!r}"
+            for key in ("x", "y", "w", "h"):
+                if not isinstance(w.get(key), int) or isinstance(w.get(key), bool):
+                    return f"page {i + 1}: widget {w.get('type')} has invalid {key}"
+    return None
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print(fmt % args)
@@ -85,13 +109,17 @@ class Handler(BaseHTTPRequestHandler):
         """Reject cross-site requests and DNS-rebinding (Host must be loopback).
 
         A missing Origin means a non-browser client (curl, scripts) — allowed,
-        since browsers always attach one to cross-origin requests.
+        since browsers always attach one to cross-origin requests. Any loopback
+        origin passes, because Vite may land on a port other than 5173.
         """
-        host = self.headers.get("Host", "").rsplit(":", 1)[0].strip("[]")
-        if host not in ALLOWED_HOSTS:
+        host = urlsplit("//" + self.headers.get("Host", "")).hostname
+        if host is None or host.lower() not in ALLOWED_HOSTS:
             return False
         origin = self.headers.get("Origin")
-        return origin is None or origin in ALLOWED_ORIGINS
+        if origin is None:
+            return True
+        parts = urlsplit(origin)
+        return parts.scheme == "http" and (parts.hostname or "").lower() in ALLOWED_HOSTS
 
     def do_GET(self):
         if not self._origin_allowed():
@@ -137,8 +165,11 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             self._respond(400, "Invalid Content-Length")
             return
-        if length < 0 or length > MAX_BODY:
-            self._respond(413, "Payload too large")
+        if length < 0:
+            self._respond(400, "Invalid Content-Length")
+            return
+        if length > MAX_BODY:
+            self._respond(413, f"Payload too large (max {MAX_BODY} bytes)")
             return
         body = self.rfile.read(length)
 
@@ -147,12 +178,13 @@ class Handler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, UnicodeDecodeError):
             self._respond(400, "Invalid JSON")
             return
-        if not isinstance(data, dict) or not isinstance(data.get("pages"), list):
-            self._respond(400, "Invalid layout: expected an object with a 'pages' array")
+        problem = _validate_layout(data)
+        if problem:
+            self._respond(400, f"Invalid layout: {problem}")
             return
 
-        # Check the port before touching layout.json, so a failed deploy leaves
-        # the last known-good layout on disk.
+        # Check the port before touching layout.json, so a deploy that never
+        # starts leaves the last known-good layout on disk.
         esp_port, ports, ambiguous = select_port()
         if not ports:
             self._respond(503, "ESP32 not found. Connect via USB.")
@@ -166,8 +198,15 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
-        with open(LAYOUT_FILE, "w") as f:
-            json.dump(data, f, indent=2)
+        # Write via a temp file so an interrupted write can't truncate the layout
+        tmp = LAYOUT_FILE + ".tmp"
+        try:
+            with open(tmp, "w") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp, LAYOUT_FILE)
+        except OSError as e:
+            self._respond(500, f"Failed to write layout.json: {e}")
+            return
 
         try:
             result = subprocess.run(
