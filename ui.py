@@ -1,12 +1,55 @@
 """UI widget framework for ILI9341 display."""
 from lib.ili9341 import WHITE, BLACK, GRAY, color565
 
-# --- Color palette ---
+# --- Default color palette ---
 _PRESSED_BG     = color565(60, 120, 220)
 _NORMAL_BG      = color565(30,  60, 120)
 _PRESSED_BORDER = color565(100, 160, 255)
 _NORMAL_BORDER  = color565(180, 180, 220)
 _LABEL_COLOR    = WHITE
+
+
+def _parse_hex_rgb(s):
+    """Parse '#RRGGBB' or 'RRGGBB' → (r, g, b) or None."""
+    if not s or not isinstance(s, str):
+        return None
+    s = s.strip()
+    if s[:1] == '#':
+        s = s[1:]
+    if len(s) != 6:
+        return None
+    try:
+        return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+    except ValueError:
+        return None
+
+
+def _clamp_byte(v):
+    return 0 if v < 0 else (255 if v > 255 else int(v))
+
+
+def _lighten(rgb, amount=50):
+    r, g, b = rgb
+    return (_clamp_byte(r + amount), _clamp_byte(g + amount), _clamp_byte(b + amount))
+
+
+def _darken(rgb, amount=40):
+    r, g, b = rgb
+    return (_clamp_byte(r - amount), _clamp_byte(g - amount), _clamp_byte(b - amount))
+
+
+def _rgb565(rgb):
+    return color565(rgb[0], rgb[1], rgb[2])
+
+
+def _draw_border(t, x, y, w, h, c):
+    for i in range(2):
+        bx, by = x + i, y + i
+        bw, bh = w - i * 2, h - i * 2
+        t.fill_rect(bx, by, bw, 1, c)
+        t.fill_rect(bx, by + bh - 1, bw, 1, c)
+        t.fill_rect(bx, by, 1, bh, c)
+        t.fill_rect(bx + bw - 1, by, 1, bh, c)
 
 
 class Widget:
@@ -60,22 +103,27 @@ class Widget:
 class Button(Widget):
     """Momentary button — sends 1.0 while held, 0.0 on release."""
 
-    def __init__(self, tft, x, y, w, h, label, osc_addr):
+    def __init__(self, tft, x, y, w, h, label, osc_addr, color=None):
         super().__init__(tft, x, y, w, h, osc_addr)
         self.label = label
+        rgb = _parse_hex_rgb(color)
+        if rgb:
+            self._normal_bg = _rgb565(rgb)
+            self._pressed_bg = _rgb565(_lighten(rgb, 50))
+            self._normal_border = _rgb565(_lighten(rgb, 90))
+            self._pressed_border = _rgb565(_lighten(rgb, 130))
+        else:
+            self._normal_bg = _NORMAL_BG
+            self._pressed_bg = _PRESSED_BG
+            self._normal_border = _NORMAL_BORDER
+            self._pressed_border = _PRESSED_BORDER
 
     def draw(self):
-        bg = _PRESSED_BG if self._touching else _NORMAL_BG
-        c  = _PRESSED_BORDER if self._touching else _NORMAL_BORDER
+        bg = self._pressed_bg if self._touching else self._normal_bg
+        c = self._pressed_border if self._touching else self._normal_border
         t = self.tft
         t.fill_rect(self.x, self.y, self.w, self.h, bg)
-        for i in range(2):
-            bx, by = self.x + i, self.y + i
-            bw, bh = self.w - i * 2, self.h - i * 2
-            t.fill_rect(bx, by, bw, 1, c)
-            t.fill_rect(bx, by + bh - 1, bw, 1, c)
-            t.fill_rect(bx, by, 1, bh, c)
-            t.fill_rect(bx + bw - 1, by, 1, bh, c)
+        _draw_border(t, self.x, self.y, self.w, self.h, c)
         lx = self.x + (self.w - len(self.label) * 8) // 2
         ly = self.y + (self.h - 8) // 2
         t.text(self.label, lx, ly, _LABEL_COLOR, bg)
@@ -98,11 +146,25 @@ class Toggle(Widget):
     _OFF_BORDER = color565(120, 130, 150)
     _PRESS_BG   = color565(40, 140, 100)
 
-    def __init__(self, tft, x, y, w, h, label, osc_addr, default=0):
+    def __init__(self, tft, x, y, w, h, label, osc_addr, default=0, color=None):
         super().__init__(tft, x, y, w, h, osc_addr)
         self.label = label
         self._on = bool(default)
         self._pending_osc = False
+        rgb = _parse_hex_rgb(color)
+        if rgb:
+            # OFF = darker base, ON = brighter, press = mid
+            self._off_bg = _rgb565(_darken(rgb, 35))
+            self._on_bg = _rgb565(rgb)
+            self._press_bg = _rgb565(_lighten(rgb, 30))
+            self._on_border = _rgb565(_lighten(rgb, 90))
+            self._off_border = _rgb565(_lighten(_darken(rgb, 20), 40))
+        else:
+            self._off_bg = self._OFF_BG
+            self._on_bg = self._ON_BG
+            self._press_bg = self._PRESS_BG
+            self._on_border = self._ON_BORDER
+            self._off_border = self._OFF_BORDER
 
     @property
     def value(self):
@@ -118,23 +180,16 @@ class Toggle(Widget):
 
     def draw(self):
         if self._touching:
-            bg, c = self._PRESS_BG, self._ON_BORDER
+            bg, c = self._press_bg, self._on_border
         elif self._on:
-            bg, c = self._ON_BG, self._ON_BORDER
+            bg, c = self._on_bg, self._on_border
         else:
-            bg, c = self._OFF_BG, self._OFF_BORDER
+            bg, c = self._off_bg, self._off_border
         t = self.tft
         t.fill_rect(self.x, self.y, self.w, self.h, bg)
-        for i in range(2):
-            bx, by = self.x + i, self.y + i
-            bw, bh = self.w - i * 2, self.h - i * 2
-            t.fill_rect(bx, by, bw, 1, c)
-            t.fill_rect(bx, by + bh - 1, bw, 1, c)
-            t.fill_rect(bx, by, 1, bh, c)
-            t.fill_rect(bx + bw - 1, by, 1, bh, c)
-        # ON indicator bar on the left
+        _draw_border(t, self.x, self.y, self.w, self.h, c)
         if self._on:
-            t.fill_rect(self.x + 3, self.y + 3, 4, self.h - 6, self._ON_BORDER)
+            t.fill_rect(self.x + 3, self.y + 3, 4, self.h - 6, self._on_border)
         text = self.label
         lx = self.x + (self.w - len(text) * 8) // 2
         ly = self.y + (self.h - 8) // 2
@@ -169,11 +224,18 @@ class Slider(Widget):
     _KNOB_COLOR  = color565(100, 180, 255)
     _KNOB_PRESSED = color565(140, 210, 255)
 
-    def __init__(self, tft, x, y, w, h, osc_addr, default=127, label=''):
+    def __init__(self, tft, x, y, w, h, osc_addr, default=127, label='', color=None):
         super().__init__(tft, x, y, w, h, osc_addr)
         self.label = label or ''
         self._value = default
         self._prev_ky = None
+        rgb = _parse_hex_rgb(color)
+        if rgb:
+            self._knob = _rgb565(rgb)
+            self._knob_pressed = _rgb565(_lighten(rgb, 50))
+        else:
+            self._knob = self._KNOB_COLOR
+            self._knob_pressed = self._KNOB_PRESSED
 
     @property
     def value(self):
@@ -223,7 +285,7 @@ class Slider(Widget):
         th = max(bot - top, 1)
         t.fill_rect(cx - 1, top, 3, th, self._TRACK_COLOR)
         ky = self._knob_y()
-        kc = self._KNOB_PRESSED if self._touching else self._KNOB_COLOR
+        kc = self._knob_pressed if self._touching else self._knob
         t.fill_rect(cx - self._KNOB_W // 2, ky - 4, self._KNOB_W, 9, kc)
         self._prev_ky = ky
         self._draw_label()
@@ -239,7 +301,6 @@ class Slider(Widget):
         top = self._track_top()
         bot = self._track_bot()
 
-        # Erase old knob and restore track pixels
         if self._prev_ky is not None:
             t.fill_rect(cx - kw2, self._prev_ky - 4, self._KNOB_W, 9, BLACK)
             tk_top = max(top, self._prev_ky - 4)
@@ -247,7 +308,7 @@ class Slider(Widget):
             if tk_bot > tk_top:
                 t.fill_rect(cx - 1, tk_top, 3, tk_bot - tk_top, self._TRACK_COLOR)
 
-        t.fill_rect(cx - kw2, ky - 4, self._KNOB_W, 9, self._KNOB_PRESSED)
+        t.fill_rect(cx - kw2, ky - 4, self._KNOB_W, 9, self._knob_pressed)
         self._prev_ky = ky
 
     def _set_value(self, ty):
@@ -288,11 +349,18 @@ class HSlider(Widget):
     _KNOB_COLOR   = color565(100, 180, 255)
     _KNOB_PRESSED = color565(140, 210, 255)
 
-    def __init__(self, tft, x, y, w, h, osc_addr, default=127, label=''):
+    def __init__(self, tft, x, y, w, h, osc_addr, default=127, label='', color=None):
         super().__init__(tft, x, y, w, h, osc_addr)
         self.label = label or ''
         self._value = default
         self._prev_kx = None
+        rgb = _parse_hex_rgb(color)
+        if rgb:
+            self._knob = _rgb565(rgb)
+            self._knob_pressed = _rgb565(_lighten(rgb, 50))
+        else:
+            self._knob = self._KNOB_COLOR
+            self._knob_pressed = self._KNOB_PRESSED
 
     @property
     def value(self):
@@ -311,7 +379,6 @@ class HSlider(Widget):
         return self._LABEL_H if self.label else 0
 
     def _track_y(self):
-        # Center track in the area below the label strip.
         top = self.y + self._label_reserve()
         return top + (self.h - self._label_reserve()) // 2
 
@@ -340,7 +407,7 @@ class HSlider(Widget):
         t.fill_rect(self.x, self.y, self.w, self.h, BLACK)
         t.fill_rect(self.x + 8, cy - 1, self.w - 16, 3, self._TRACK_COLOR)
         kx = self._knob_x()
-        kc = self._KNOB_PRESSED if self._touching else self._KNOB_COLOR
+        kc = self._knob_pressed if self._touching else self._knob
         rx, ry, rw, rh = self._knob_rect(kx)
         t.fill_rect(rx, ry, rw, rh, kc)
         self._prev_kx = kx
@@ -360,7 +427,7 @@ class HSlider(Widget):
             if tk_hi > tk_lo:
                 t.fill_rect(tk_lo, cy - 1, tk_hi - tk_lo, 3, self._TRACK_COLOR)
         nx, ny, nw, nh = self._knob_rect(kx)
-        t.fill_rect(nx, ny, nw, nh, self._KNOB_PRESSED)
+        t.fill_rect(nx, ny, nw, nh, self._knob_pressed)
         self._prev_kx = kx
 
     def _set_value(self, tx, ty):
@@ -390,7 +457,7 @@ class HSlider(Widget):
 class PageButton(Widget):
     """Tapping switches to the target page. No OSC message sent."""
 
-    def __init__(self, tft, x, y, w, h, nav_mode='goto', target_page=0, label=''):
+    def __init__(self, tft, x, y, w, h, nav_mode='goto', target_page=0, label='', color=None):
         super().__init__(tft, x, y, w, h, osc_addr='')
         self.nav_mode = nav_mode
         self.target_page = target_page
@@ -402,22 +469,29 @@ class PageButton(Widget):
             self._label = '>>'
         else:
             self._label = f'>{target_page + 1}'
+        rgb = _parse_hex_rgb(color)
+        if rgb:
+            self._normal_bg = _rgb565(_darken(rgb, 10))
+            self._pressed_bg = _rgb565(_lighten(rgb, 40))
+            self._normal_border = _rgb565(_lighten(rgb, 70))
+            self._pressed_border = _rgb565(_lighten(rgb, 110))
+            self._label_color = _rgb565(_lighten(rgb, 140))
+        else:
+            self._normal_bg = color565(10, 30, 20)
+            self._pressed_bg = color565(20, 60, 40)
+            self._normal_border = color565(50, 160, 80)
+            self._pressed_border = color565(80, 220, 120)
+            self._label_color = color565(100, 255, 150)
 
     def draw(self):
-        bg = color565(20, 60, 40) if self._touching else color565(10, 30, 20)
-        c  = color565(80, 220, 120) if self._touching else color565(50, 160, 80)
+        bg = self._pressed_bg if self._touching else self._normal_bg
+        c = self._pressed_border if self._touching else self._normal_border
         t = self.tft
         t.fill_rect(self.x, self.y, self.w, self.h, bg)
-        for i in range(2):
-            bx, by = self.x + i, self.y + i
-            bw, bh = self.w - i * 2, self.h - i * 2
-            t.fill_rect(bx, by, bw, 1, c)
-            t.fill_rect(bx, by + bh - 1, bw, 1, c)
-            t.fill_rect(bx, by, 1, bh, c)
-            t.fill_rect(bx + bw - 1, by, 1, bh, c)
+        _draw_border(t, self.x, self.y, self.w, self.h, c)
         lx = self.x + (self.w - len(self._label) * 8) // 2
         ly = self.y + (self.h - 8) // 2
-        t.text(self._label, lx, ly, color565(100, 255, 150), bg)
+        t.text(self._label, lx, ly, self._label_color, bg)
 
     def on_touch(self, tx, ty): self.draw()
     def on_release(self):

@@ -1,5 +1,5 @@
 """ESP32 TD Controller - main entry point."""
-__version__ = "0.3.8"
+__version__ = "0.5.2"
 
 # Reserved footer height (IP left + version right). Always at bottom of current rotation.
 STATUS_H = 14
@@ -186,11 +186,16 @@ all_pages = []
 for page_widgets in PAGES:
     instances = []
     for w in page_widgets:
-        cls = WIDGET_MAP.get(w["type"])
-        if cls is None:
-            continue
-        kwargs = {k: v for k, v in w.items() if k not in ("type", "id")}
-        instances.append(cls(tft, **kwargs))
+        # Skip anything malformed rather than dying at import time — a bad
+        # layout would otherwise leave a blank screen until the next USB deploy.
+        try:
+            cls = WIDGET_MAP.get(w["type"])
+            if cls is None:
+                continue
+            kwargs = {k: v for k, v in w.items() if k not in ("type", "id")}
+            instances.append(cls(tft, **kwargs))
+        except (TypeError, ValueError, KeyError, AttributeError) as e:
+            print("skipping widget:", e)
     all_pages.append(instances)
 
 if not all_pages:
@@ -294,6 +299,9 @@ draw_page(current_page)
 # --- Main loop ---
 _OSC_INTERVAL_MS = 20
 _last_osc = {}
+# Widget owning the current touch. Only it receives events until release, so
+# dragging across widgets can't leave a stale _touching behind on the one we left.
+_active = None
 
 try:
     while True:
@@ -304,8 +312,17 @@ try:
         pos = touch.get_pos()
         now = time.ticks_ms()
 
-        for w in all_pages[current_page]:
+        w = _active
+        if w is None and pos:
+            for cand in all_pages[current_page]:
+                if cand.hit(pos[0], pos[1]):
+                    w = _active = cand
+                    break
+
+        if w is not None:
             claimed = w.process(pos)
+            if pos is None:
+                _active = None
             if claimed:
                 if isinstance(w, PageButton) and not w._touching:
                     mode = getattr(w, 'nav_mode', 'goto')
@@ -330,7 +347,6 @@ try:
                             _safe_send(w.osc_addr, *msg)
                     if _widget_overlaps_status(w):
                         _draw_status()
-                break
 
         time.sleep_ms(10)
 except KeyboardInterrupt:

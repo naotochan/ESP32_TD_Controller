@@ -1,7 +1,7 @@
 import { useLayoutEffect, useState, useCallback } from 'react'
 
 /** Resolve PageButton → destination page index (or null / invalid). */
-export function resolvePageLinkTarget(widget, pageIdx, pageCount) {
+function resolvePageLinkTarget(widget, pageIdx, pageCount) {
   const mode = widget.nav_mode || 'goto'
   if (mode === 'prev') {
     return pageIdx > 0 ? { target: pageIdx - 1, invalid: false } : null
@@ -15,47 +15,69 @@ export function resolvePageLinkTarget(widget, pageIdx, pageCount) {
   return { target: t, invalid: false }
 }
 
-function edgePoint(slotRect, fromX, fromY) {
-  const cx = slotRect.left + slotRect.width / 2
-  const cy = slotRect.top + slotRect.height / 2
-  const dx = cx - fromX
-  const dy = cy - fromY
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    // Approach from left or right
-    if (dx >= 0) {
-      return { x: slotRect.left, y: cy, dir: 'left' }
-    }
-    return { x: slotRect.right, y: cy, dir: 'right' }
+/** Enter target page-slot from the near side, keeping source Y when possible. */
+function sideEntry(slotRect, fromX, fromY) {
+  const pad = 10
+  const y = Math.max(slotRect.top + pad, Math.min(slotRect.bottom - pad, fromY))
+  const midX = slotRect.left + slotRect.width / 2
+  if (fromX < midX) {
+    return { x: slotRect.left, y, dir: 'left' }
   }
-  if (dy >= 0) {
-    return { x: cx, y: slotRect.top, dir: 'top' }
-  }
-  return { x: cx, y: slotRect.bottom, dir: 'bottom' }
+  return { x: slotRect.right, y, dir: 'right' }
 }
 
-function arrowHead(x, y, dir, size = 7) {
-  // Arrow tip at (x,y), pointing into the slot
+/** Leave the button from the edge facing the destination. */
+function startExit(btn, towardX, towardY) {
+  const cx = btn.left + btn.width / 2
+  const cy = btn.top + btn.height / 2
+  const dx = towardX - cx
+  const dy = towardY - cy
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0
+      ? { x: btn.right, y: cy }
+      : { x: btn.left, y: cy }
+  }
+  return dy >= 0
+    ? { x: cx, y: btn.bottom }
+    : { x: cx, y: btn.top }
+}
+
+function arrowHead(x, y, dir, size = 8) {
   if (dir === 'left') {
-    return `M${x},${y} L${x - size},${y - size * 0.6} L${x - size},${y + size * 0.6} Z`
+    return `M${x},${y} L${x - size},${y - size * 0.55} L${x - size},${y + size * 0.55} Z`
   }
   if (dir === 'right') {
-    return `M${x},${y} L${x + size},${y - size * 0.6} L${x + size},${y + size * 0.6} Z`
+    return `M${x},${y} L${x + size},${y - size * 0.55} L${x + size},${y + size * 0.55} Z`
   }
   if (dir === 'top') {
-    return `M${x},${y} L${x - size * 0.6},${y - size} L${x + size * 0.6},${y - size} Z`
+    return `M${x},${y} L${x - size * 0.55},${y - size} L${x + size * 0.55},${y - size} Z`
   }
-  return `M${x},${y} L${x - size * 0.6},${y + size} L${x + size * 0.6},${y + size} Z`
+  return `M${x},${y} L${x - size * 0.55},${y + size} L${x + size * 0.55},${y + size} Z`
 }
 
-function curvePath(x1, y1, x2, y2) {
-  const mx = (x1 + x2) / 2
-  const my = (y1 + y2) / 2
+/**
+ * Horizontal-first cubic; lane spreads parallel / opposing links so they don't stack.
+ * lane: … -2,-1,1,2 … (skip 0 so a pair splits above/below)
+ */
+function routePath(x1, y1, x2, y2, lane = 1) {
   const dx = x2 - x1
   const dy = y2 - y1
-  // Offset control point perpendicular-ish for a soft arc
-  const cx = mx + dy * 0.12
-  const cy = my - dx * 0.08
-  return `M${x1},${y1} Q${cx},${cy} ${x2},${y2}`
+  const lanePx = lane * 16
+
+  if (Math.abs(dx) >= Math.abs(dy) * 0.55) {
+    // Sideways: S-curve through the gap between pages
+    const mx = (x1 + x2) / 2
+    return `M${x1},${y1} C${mx},${y1 + lanePx} ${mx},${y2 + lanePx} ${x2},${y2}`
+  }
+  // Mostly vertical: bow sideways
+  const my = (y1 + y2) / 2
+  return `M${x1},${y1} C${x1 + lanePx},${my} ${x2 + lanePx},${my} ${x2},${y2}`
+}
+
+/** Alternate +1,-1,+2,-2… so mutual links (next/prev) sit on opposite sides. */
+function laneForIndex(i) {
+  const n = Math.floor(i / 2) + 1
+  return i % 2 === 0 ? n : -n
 }
 
 /**
@@ -82,23 +104,31 @@ export default function PageLinksOverlay({
     const rootRect = root.getBoundingClientRect()
     setSize({ w: root.scrollWidth, h: root.scrollHeight })
 
+    const toLocal = (clientX, clientY) => ({
+      x: (clientX - rootRect.left) / inv + root.scrollLeft,
+      y: (clientY - rootRect.top) / inv + root.scrollTop,
+    })
+
     const slotEls = [...root.querySelectorAll('[data-page-slot]')]
     const slotMap = new Map()
     slotEls.forEach((el) => {
       const idx = Number(el.getAttribute('data-page-slot'))
       const r = el.getBoundingClientRect()
+      const tl = toLocal(r.left, r.top)
+      const br = toLocal(r.right, r.bottom)
       slotMap.set(idx, {
-        left: (r.left - rootRect.left) / inv + root.scrollLeft,
-        top: (r.top - rootRect.top) / inv + root.scrollTop,
-        right: (r.right - rootRect.left) / inv + root.scrollLeft,
-        bottom: (r.bottom - rootRect.top) / inv + root.scrollTop,
-        width: r.width / inv,
-        height: r.height / inv,
+        left: tl.x,
+        top: tl.y,
+        right: br.x,
+        bottom: br.y,
+        width: br.x - tl.x,
+        height: br.y - tl.y,
       })
     })
 
     const pageCount = pages.length
-    const next = []
+    const drafts = []
+    const pairIndex = new Map()
 
     pages.forEach((pageWidgets, pageIdx) => {
       ;(pageWidgets || []).forEach((w) => {
@@ -106,13 +136,21 @@ export default function PageLinksOverlay({
         const resolved = resolvePageLinkTarget(w, pageIdx, pageCount)
         if (!resolved) return
 
-        const btn = root.querySelector(
+        const btnEl = root.querySelector(
           `[data-page-link="1"][data-widget-id="${w.id}"][data-page-idx="${pageIdx}"]`
         )
-        if (!btn) return
-        const br = btn.getBoundingClientRect()
-        const x1 = (br.left + br.width / 2 - rootRect.left) / inv + root.scrollLeft
-        const y1 = (br.top + br.height / 2 - rootRect.top) / inv + root.scrollTop
+        if (!btnEl) return
+        const br = btnEl.getBoundingClientRect()
+        const tl = toLocal(br.left, br.top)
+        const brLocal = toLocal(br.right, br.bottom)
+        const btn = {
+          left: tl.x,
+          top: tl.y,
+          right: brLocal.x,
+          bottom: brLocal.y,
+          width: brLocal.x - tl.x,
+          height: brLocal.y - tl.y,
+        }
 
         const selected = selectedIds.includes(w.id)
         const emphasized =
@@ -121,12 +159,12 @@ export default function PageLinksOverlay({
           (!resolved.invalid && resolved.target === currentPage)
 
         if (resolved.invalid) {
-          // Short stub pointing right as error marker
-          const x2 = x1 + 28
-          const y2 = y1
-          next.push({
+          const start = startExit(btn, btn.right + 40, btn.top + btn.height / 2)
+          const x2 = start.x + 28
+          const y2 = start.y
+          drafts.push({
             id: `${pageIdx}-${w.id}`,
-            d: `M${x1},${y1} L${x2},${y2}`,
+            d: `M${start.x},${start.y} L${x2},${y2}`,
             arrow: arrowHead(x2, y2, 'right'),
             invalid: true,
             emphasized,
@@ -137,10 +175,24 @@ export default function PageLinksOverlay({
         const localSlot = slotMap.get(resolved.target)
         if (!localSlot) return
 
-        const end = edgePoint(localSlot, x1, y1)
-        next.push({
+        // Provisional end for exit direction; refine after start known
+        const endGuess = sideEntry(
+          localSlot,
+          btn.left + btn.width / 2,
+          btn.top + btn.height / 2,
+        )
+        const start = startExit(btn, endGuess.x, endGuess.y)
+        const end = sideEntry(localSlot, start.x, start.y)
+
+        const a = Math.min(pageIdx, resolved.target)
+        const b = Math.max(pageIdx, resolved.target)
+        const pairKey = `${a}-${b}`
+        const i = pairIndex.get(pairKey) || 0
+        pairIndex.set(pairKey, i + 1)
+
+        drafts.push({
           id: `${pageIdx}-${w.id}`,
-          d: curvePath(x1, y1, end.x, end.y),
+          d: routePath(start.x, start.y, end.x, end.y, laneForIndex(i)),
           arrow: arrowHead(end.x, end.y, end.dir),
           invalid: false,
           emphasized,
@@ -148,7 +200,7 @@ export default function PageLinksOverlay({
       })
     })
 
-    setPaths(next)
+    setPaths(drafts)
   }, [containerRef, pages, selectedIds, currentPage, zoom])
 
   useLayoutEffect(() => {
@@ -161,7 +213,6 @@ export default function PageLinksOverlay({
     root.querySelectorAll('[data-page-slot]').forEach((el) => ro.observe(el))
 
     window.addEventListener('resize', measure)
-    // Re-measure after layout settles (fonts / canvas size)
     const t = requestAnimationFrame(measure)
 
     return () => {
@@ -169,7 +220,7 @@ export default function PageLinksOverlay({
       window.removeEventListener('resize', measure)
       cancelAnimationFrame(t)
     }
-  }, [measure, revision, pages, selectedIds, currentPage])
+  }, [measure, containerRef, revision, pages, selectedIds, currentPage])
 
   if (size.w === 0 || paths.length === 0) return null
 
@@ -185,6 +236,7 @@ export default function PageLinksOverlay({
           key={p.id}
           className={`page-link ${p.invalid ? 'invalid' : ''} ${p.emphasized ? 'emphasized' : ''}`}
         >
+          <path d={p.d} fill="none" className="page-link-path page-link-path-halo" />
           <path d={p.d} fill="none" className="page-link-path" />
           <path d={p.arrow} className="page-link-arrow" />
         </g>

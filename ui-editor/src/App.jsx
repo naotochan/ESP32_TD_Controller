@@ -7,6 +7,9 @@ import ExportButton from './ExportButton'
 import useUndoableState from './useUndoableState'
 import LayersPanel from './LayersPanel'
 import PageLinksOverlay from './PageLinksOverlay'
+import { nextUniqueLabel, nextUniqueOscAddr, uniquifyWidgets } from './uniqueNames'
+import { isTextEntry } from './textEntry'
+import { APP_VERSION } from './version'
 
 /** Screen size for rotation degrees 0/90/180/270 (CYD 240×320 panel). */
 function screenSizeForRotation(deg) {
@@ -14,7 +17,7 @@ function screenSizeForRotation(deg) {
 }
 
 /** Normalize loaded layout rotation → degrees 0|90|180|270. */
-export function normalizeRotationDeg(data) {
+function normalizeRotationDeg(data) {
   if (data && data.rotation != null) {
     const r = Number(data.rotation)
     if (r === 90 || r === 180 || r === 270) return r
@@ -26,13 +29,33 @@ export function normalizeRotationDeg(data) {
 
 const ROTATION_STORAGE_KEY = 'esp32-td-rotation-deg'
 const ZOOM_STORAGE_KEY = 'esp32-td-editor-zoom'
+const LAYOUT_STORAGE_KEY = 'esp32-td-editor-layout'
+/** Debounce for layout autosave — drags fire updates continuously. */
+const AUTOSAVE_DELAY_MS = 300
 const ZOOM_MIN = 0.5
 const ZOOM_MAX = 2
-const ZOOM_STEP = 0.1
+const ZOOM_STEP = 0.05
+/** Wheel/trackpad pinch: pixel delta → zoom (macOS pinch arrives as ctrl+wheel) */
+const ZOOM_WHEEL_FACTOR = 0.0015
 
 function clampZoom(z) {
-  const n = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) * 10) / 10
+  // 1% precision so pinch/trackpad deltas aren't swallowed; ± buttons still use ZOOM_STEP (5%)
+  const n = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) * 100) / 100
   return n
+}
+
+/** Cursor offset inside the scrollable content box (accounts for border + padding). */
+function scrollLocalFromClient(el, clientX, clientY) {
+  const rect = el.getBoundingClientRect()
+  const cs = getComputedStyle(el)
+  const padL = parseFloat(cs.paddingLeft) || 0
+  const padT = parseFloat(cs.paddingTop) || 0
+  const borderL = parseFloat(cs.borderLeftWidth) || 0
+  const borderT = parseFloat(cs.borderTopWidth) || 0
+  return {
+    mx: clientX - rect.left - borderL - padL,
+    my: clientY - rect.top - borderT - padT,
+  }
 }
 
 function loadStoredZoom() {
@@ -44,6 +67,35 @@ function loadStoredZoom() {
     return clampZoom(n)
   } catch {
     return 1
+  }
+}
+
+function isRestorableWidget(w) {
+  return !!w && typeof w === 'object' && typeof w.type === 'string'
+    && Number.isFinite(w.x) && Number.isFinite(w.y)
+    && Number.isFinite(w.w) && Number.isFinite(w.h)
+}
+
+/**
+ * Restore the work-in-progress layout so a reload doesn't discard it.
+ * A corrupt entry is dropped rather than restored — rendering it would throw
+ * on every mount, leaving no way back into the editor.
+ */
+function loadStoredLayout() {
+  try {
+    const raw = localStorage.getItem(LAYOUT_STORAGE_KEY)
+    if (!raw) return null
+    const data = JSON.parse(raw)
+    const usable = Array.isArray(data?.pages) && data.pages.length > 0
+      && data.pages.every(p => Array.isArray(p) && p.every(isRestorableWidget))
+    if (!usable) {
+      localStorage.removeItem(LAYOUT_STORAGE_KEY)
+      return null
+    }
+    return data
+  } catch {
+    try { localStorage.removeItem(LAYOUT_STORAGE_KEY) } catch { /* ignore */ }
+    return null
   }
 }
 
@@ -76,12 +128,15 @@ const WIDGET_TEMPLATES = {
 }
 
 export default function App() {
+  const [restored] = useState(loadStoredLayout)
   // pagesState holds [[widget, ...], [widget, ...], ...] — one array per page
-  const pagesState = useUndoableState([[]])
+  const pagesState = useUndoableState(restored?.pages ?? [[]])
   const [currentPage, setCurrentPage] = useState(0)
   const [selectedIds, setSelectedIds] = useState([])
   const [clipboard, setClipboard] = useState([])
-  const [rotationDeg, setRotationDeg] = useState(loadStoredRotationDeg)
+  const [rotationDeg, setRotationDeg] = useState(
+    () => (restored ? normalizeRotationDeg(restored) : loadStoredRotationDeg()),
+  )
   const [showGrid, setShowGrid] = useState(true)
   const [snapToGrid, setSnapToGrid] = useState(true)
   const [zoom, setZoom] = useState(loadStoredZoom)
@@ -97,16 +152,39 @@ export default function App() {
     try { localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom)) } catch { /* ignore */ }
   }, [zoom])
 
-  // Stable refs so callbacks always read the latest values without deps
+  // Autosave the layout — the editor is the only copy until Save / Deploy
+  useEffect(() => {
+    const id = setTimeout(() => {
+      try {
+        localStorage.setItem(
+          LAYOUT_STORAGE_KEY,
+          JSON.stringify({ rotation: rotationDeg, pages: pagesState.value }),
+        )
+      } catch { /* quota / private mode */ }
+    }, AUTOSAVE_DELAY_MS)
+    return () => clearTimeout(id)
+  }, [pagesState.value, rotationDeg])
+
+  // Stable refs so callbacks always read the latest values without deps.
+  // Written in a layout effect: after commit (never during render), but before
+  // the browser can deliver the next event, so handlers never see a stale value.
+  // applyZoom also writes zoomRef directly so batched pinch deltas accumulate.
   const currentPageRef = useRef(currentPage)
-  currentPageRef.current = currentPage
   const pagesRef = useRef(pagesState.value)
-  pagesRef.current = pagesState.value
+  const zoomRef = useRef(zoom)
+  useLayoutEffect(() => {
+    currentPageRef.current = currentPage
+    pagesRef.current = pagesState.value
+    zoomRef.current = zoom
+  }, [currentPage, pagesState.value, zoom])
+
   const pagesRowRef = useRef(null)
   const canvasAreaRef = useRef(null)
   const panRef = useRef(null)
-  const zoomRef = useRef(zoom)
-  zoomRef.current = zoom
+  /** Last pointer over canvas — ± buttons zoom toward this */
+  const lastPointerRef = useRef(null)
+  /** Pending cursor-anchored scroll correction (survives React batching) */
+  const zoomAnchorRef = useRef(null)
 
   const pageCount = pagesState.value.length
 
@@ -127,30 +205,57 @@ export default function App() {
     return () => ro.disconnect()
   }, [pageCount, rotationDeg, screenW, screenH])
 
+  // Keep the pre-zoom content point under the cursor after spacer size updates
+  useLayoutEffect(() => {
+    const el = canvasAreaRef.current
+    const anchor = zoomAnchorRef.current
+    if (!el || !anchor) return
+    zoomAnchorRef.current = null
+    el.scrollLeft = anchor.ux * zoom - anchor.mx
+    el.scrollTop = anchor.uy * zoom - anchor.my
+  }, [zoom])
+
   const applyZoom = useCallback((nextZoom, anchor) => {
     const el = canvasAreaRef.current
     const oldZoom = zoomRef.current
     const newZoom = clampZoom(nextZoom)
     if (newZoom === oldZoom) return
-    if (el && anchor) {
+
+    let point = anchor ?? lastPointerRef.current
+    if (!point && el) {
       const rect = el.getBoundingClientRect()
-      const mx = anchor.clientX - rect.left
-      const my = anchor.clientY - rect.top
-      const ratio = newZoom / oldZoom
-      setZoom(newZoom)
-      requestAnimationFrame(() => {
-        el.scrollLeft = (el.scrollLeft + mx) * ratio - mx
-        el.scrollTop = (el.scrollTop + my) * ratio - my
-      })
-    } else {
-      setZoom(newZoom)
+      point = { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }
     }
+
+    if (el && point) {
+      const { mx, my } = scrollLocalFromClient(el, point.clientX, point.clientY)
+      const pending = zoomAnchorRef.current
+      if (pending) {
+        // Batched pinch: keep unscaled content point, refresh cursor offset
+        pending.mx = mx
+        pending.my = my
+      } else {
+        zoomAnchorRef.current = {
+          mx,
+          my,
+          ux: (el.scrollLeft + mx) / oldZoom,
+          uy: (el.scrollTop + my) / oldZoom,
+        }
+      }
+    } else {
+      zoomAnchorRef.current = null
+    }
+
+    zoomRef.current = newZoom
+    setZoom(newZoom)
   }, [])
 
   const onCanvasAreaWheel = useCallback((e) => {
     if (!(e.ctrlKey || e.metaKey)) return
     e.preventDefault()
-    const step = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP
+    lastPointerRef.current = { clientX: e.clientX, clientY: e.clientY }
+    const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY
+    const step = -dy * ZOOM_WHEEL_FACTOR
     applyZoom(zoomRef.current + step, { clientX: e.clientX, clientY: e.clientY })
   }, [applyZoom])
 
@@ -163,6 +268,7 @@ export default function App() {
   }, [onCanvasAreaWheel])
 
   const onCanvasAreaPointerDown = useCallback((e) => {
+    lastPointerRef.current = { clientX: e.clientX, clientY: e.clientY }
     if (e.button !== 0) return
     // Pan only when starting on empty chrome (not pages, toolbar, buttons)
     if (e.target.closest('.page-slot, .canvas-overlay-toolbar, button, a, input, select, textarea')) {
@@ -183,6 +289,7 @@ export default function App() {
   }, [])
 
   const onCanvasAreaPointerMove = useCallback((e) => {
+    lastPointerRef.current = { clientX: e.clientX, clientY: e.clientY }
     const pan = panRef.current
     if (!pan || pan.pointerId !== e.pointerId) return
     const el = canvasAreaRef.current
@@ -203,39 +310,42 @@ export default function App() {
   }, [])
 
   const widgets = pagesState.value[currentPage] || []
+  // Stable setters — safe as individual callback deps
+  const { set: setPages, setSilent: setPagesSilent, pushToHistory: pushPagesHistory } = pagesState
 
   // --- Helpers: operate on a specific page (defaults to current) ---
   const updatePageAt = useCallback((pageIdx, updater) => {
-    pagesState.set(prev => {
+    setPages(prev => {
       const next = [...prev]
       next[pageIdx] = updater(next[pageIdx] || [])
       return next
     })
-  }, [pagesState.set])
+  }, [setPages])
 
   const updatePageAtSilent = useCallback((pageIdx, updater) => {
-    pagesState.setSilent(prev => {
+    setPagesSilent(prev => {
+      const page = prev[pageIdx] || []
+      const updated = updater(page)
+      // Keep the array identity when nothing changed, so a drag that moved
+      // nothing leaves the undo/redo stacks untouched
+      if (updated === page) return prev
       const next = [...prev]
-      next[pageIdx] = updater(next[pageIdx] || [])
+      next[pageIdx] = updated
       return next
     })
-  }, [pagesState.setSilent])
+  }, [setPagesSilent])
 
   const updatePage = useCallback((updater) => {
     updatePageAt(currentPageRef.current, updater)
   }, [updatePageAt])
 
-  const updatePageSilent = useCallback((updater) => {
-    updatePageAtSilent(currentPageRef.current, updater)
-  }, [updatePageAtSilent])
-
   // --- Page management ---
   const addPage = useCallback(() => {
     const newIdx = pagesRef.current.length
-    pagesState.set(prev => [...prev, []])
+    setPages(prev => [...prev, []])
     setCurrentPage(newIdx)
     setSelectedIds([])
-  }, [pagesState.set])
+  }, [setPages])
 
   const removePage = useCallback((idx) => {
     const len = pagesRef.current.length
@@ -247,7 +357,7 @@ export default function App() {
       )
       if (!ok) return
     }
-    pagesState.set(prev => {
+    setPages(prev => {
       const next = prev.filter((_, i) => i !== idx)
       // Remap PageButton targets after the removed index
       return next.map(pageWidgets =>
@@ -265,7 +375,7 @@ export default function App() {
       return Math.min(prev, len - 2)
     })
     setSelectedIds([])
-  }, [pagesState.set])
+  }, [setPages])
 
   const switchPage = useCallback((idx) => {
     if (idx === currentPageRef.current) return
@@ -277,25 +387,17 @@ export default function App() {
   const onAddWidgetToPage = useCallback((pageIdx, templateType, x, y) => {
     setCurrentPage(pageIdx)
     const tmpl = WIDGET_TEMPLATES[templateType]
-    const currentWidgets = pagesRef.current[pageIdx] || []
-    const count = currentWidgets.filter(w => w.type === templateType).length + 1
+    const pages = pagesRef.current
+    const currentWidgets = pages[pageIdx] || []
     let nx = Math.max(0, Math.min(screenW - tmpl.w, x || 10))
     let ny = Math.max(0, Math.min(screenH - STATUS_BAR_H - tmpl.h, y || 10))
 
-    const labels = {
-      Button: 'BTN ', Toggle: 'TOG ', Slider: 'SLIDER ', HSlider: 'HSLIDER ',
-      PageButton: 'PAGE ',
-    }
     const newWidget = {
       id: Date.now(),
       type: templateType,
       x: nx, y: ny, w: tmpl.w, h: tmpl.h,
-      label: (labels[templateType] || '') + count,
-      osc_addr: templateType === 'Button'      ? `/esp32/button/${count}`
-               : templateType === 'Toggle'     ? `/esp32/toggle/${count}`
-               : templateType === 'Slider'     ? `/esp32/slider/${count}`
-               : templateType === 'HSlider'    ? `/esp32/hslider/${count}`
-               : '',
+      label: nextUniqueLabel(pages, templateType),
+      osc_addr: nextUniqueOscAddr(pages, templateType),
     }
     if (templateType === 'Slider' || templateType === 'HSlider') newWidget.default = 127
     if (templateType === 'Toggle') newWidget.default = 0
@@ -334,13 +436,16 @@ export default function App() {
     setSelectedIds(ids)
   }, [])
 
-  const onSelectMany = useCallback((ids) => {
-    onSelectManyOnPage(currentPageRef.current, ids)
-  }, [onSelectManyOnPage])
-
   // History-recording versions (Properties panel)
   const onUpdate = useCallback((id, changes) => {
-    updatePage(prev => prev.map(w => w.id === id ? { ...w, ...changes } : w))
+    updatePage(prev => prev.map((w) => {
+      if (w.id !== id) return w
+      const next = { ...w, ...changes }
+      if ('color' in changes && (changes.color == null || changes.color === '')) {
+        delete next.color
+      }
+      return next
+    }))
   }, [updatePage])
 
   const onUpdateMany = useCallback((updaterFn) => {
@@ -359,8 +464,8 @@ export default function App() {
   // Canvas calls this to snapshot ALL pages at drag start, then commits on drag end
   const onGetSnapshot = useCallback(() => pagesRef.current, [])
   const onCommitDrag = useCallback((snapshot) => {
-    pagesState.pushToHistory(snapshot)
-  }, [pagesState.pushToHistory])
+    pushPagesHistory(snapshot)
+  }, [pushPagesHistory])
 
   const onReorder = useCallback((id, direction) => {
     updatePage(prev => {
@@ -382,7 +487,7 @@ export default function App() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+      if (isTextEntry(e.target)) return
 
       if (e.key === 'Escape') { setSelectedIds([]); return }
 
@@ -426,12 +531,15 @@ export default function App() {
       if (mod && e.key === 'v' && clipboard.length > 0) {
         e.preventDefault()
         const base = Date.now()
-        const pasted = clipboard.map((w, i) => ({
-          ...w,
-          id: base + i,
-          x: Math.min(screenW - w.w, w.x + 10),
-          y: Math.min(screenH - STATUS_BAR_H - w.h, w.y + 10),
-        }))
+        const pasted = uniquifyWidgets(
+          pagesRef.current,
+          clipboard.map((w, i) => ({
+            ...w,
+            id: base + i,
+            x: Math.min(screenW - w.w, w.x + 10),
+            y: Math.min(screenH - STATUS_BAR_H - w.h, w.y + 10),
+          })),
+        )
         updatePage(prev => [...prev, ...pasted])
         setSelectedIds(pasted.map(w => w.id))
       }
@@ -450,13 +558,13 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>ESP32 UI Layout Editor <span className="app-version">v0.3.7</span></h1>
+        <h1>ESP32 UI Layout Editor <span className="app-version">v{APP_VERSION}</span></h1>
         <div className="header-actions">
           <ExportButton
             pages={pagesState.value}
             rotationDeg={rotationDeg}
             onLoad={(data) => {
-              pagesState.set(() => data.pages)
+              setPages(() => data.pages)
               setRotationDeg(normalizeRotationDeg(data))
               setCurrentPage(0)
               setSelectedIds([])
@@ -468,6 +576,69 @@ export default function App() {
       <div className="app-body">
         <WidgetPanel onDrop={onAddWidget} />
         <div className="canvas-area-shell">
+        <div className="canvas-overlay-toolbar">
+          <button
+            className={`canvas-tool-btn ${pagesState.canUndo ? '' : 'disabled'}`}
+            onClick={pagesState.undo}
+            title="Undo (Cmd+Z)"
+          >↩ Undo</button>
+          <button
+            className={`canvas-tool-btn ${pagesState.canRedo ? '' : 'disabled'}`}
+            onClick={pagesState.redo}
+            title="Redo (Cmd+Shift+Z)"
+          >Redo ↪</button>
+          <div className="canvas-toolbar-sep" />
+          <div className="canvas-rotation-group" title="回転">
+            <button
+              type="button"
+              className="canvas-tool-btn canvas-rot-btn"
+              onClick={() => setRotationDeg((d) => (d + 90) % 360)}
+              title="左回転"
+              aria-label="左回転"
+            >↶</button>
+            <span className="canvas-rot-deg">{rotationDeg}°</span>
+            <button
+              type="button"
+              className="canvas-tool-btn canvas-rot-btn"
+              onClick={() => setRotationDeg((d) => (d + 270) % 360)}
+              title="右回転"
+              aria-label="右回転"
+            >↷</button>
+          </div>
+          <button
+            className={`canvas-tool-btn ${showGrid ? 'active' : ''}`}
+            onClick={() => setShowGrid(prev => !prev)}
+            title="グリッド表示"
+          >Grid</button>
+          <button
+            className={`canvas-tool-btn ${snapToGrid ? 'active' : ''}`}
+            onClick={() => setSnapToGrid(prev => !prev)}
+            title="スナップ"
+          >Snap</button>
+          <div className="canvas-toolbar-sep" />
+          <div className="canvas-zoom-group" title="ズーム (Ctrl/⌘ + ホイール)">
+            <button
+              type="button"
+              className="canvas-tool-btn"
+              onClick={() => applyZoom(zoom - ZOOM_STEP)}
+              disabled={zoom <= ZOOM_MIN}
+              title="縮小"
+            >−</button>
+            <button
+              type="button"
+              className="canvas-tool-btn canvas-zoom-pct"
+              onClick={() => applyZoom(1)}
+              title="100% に戻す"
+            >{Math.round(zoom * 100)}%</button>
+            <button
+              type="button"
+              className="canvas-tool-btn"
+              onClick={() => applyZoom(zoom + ZOOM_STEP)}
+              disabled={zoom >= ZOOM_MAX}
+              title="拡大"
+            >+</button>
+          </div>
+        </div>
         <div
           className="canvas-area"
           ref={canvasAreaRef}
@@ -476,70 +647,6 @@ export default function App() {
           onPointerUp={endPan}
           onPointerCancel={endPan}
         >
-          <div className="canvas-overlay-toolbar">
-            <button
-              className={`canvas-tool-btn ${pagesState.canUndo ? '' : 'disabled'}`}
-              onClick={pagesState.undo}
-              title="Undo (Cmd+Z)"
-            >↩ Undo</button>
-            <button
-              className={`canvas-tool-btn ${pagesState.canRedo ? '' : 'disabled'}`}
-              onClick={pagesState.redo}
-              title="Redo (Cmd+Shift+Z)"
-            >Redo ↪</button>
-            <div className="canvas-toolbar-sep" />
-            <div className="canvas-rotation-group" title="回転">
-              <button
-                type="button"
-                className="canvas-tool-btn canvas-rot-btn"
-                onClick={() => setRotationDeg((d) => (d + 90) % 360)}
-                title="左回転"
-                aria-label="左回転"
-              >↶</button>
-              <span className="canvas-rot-deg">{rotationDeg}°</span>
-              <button
-                type="button"
-                className="canvas-tool-btn canvas-rot-btn"
-                onClick={() => setRotationDeg((d) => (d + 270) % 360)}
-                title="右回転"
-                aria-label="右回転"
-              >↷</button>
-            </div>
-            <button
-              className={`canvas-tool-btn ${showGrid ? 'active' : ''}`}
-              onClick={() => setShowGrid(prev => !prev)}
-              title="グリッド表示"
-            >Grid</button>
-            <button
-              className={`canvas-tool-btn ${snapToGrid ? 'active' : ''}`}
-              onClick={() => setSnapToGrid(prev => !prev)}
-              title="スナップ"
-            >Snap</button>
-            <div className="canvas-toolbar-sep" />
-            <div className="canvas-zoom-group" title="ズーム (Ctrl/⌘ + ホイール)">
-              <button
-                type="button"
-                className="canvas-tool-btn"
-                onClick={() => applyZoom(zoom - ZOOM_STEP)}
-                disabled={zoom <= ZOOM_MIN}
-                title="縮小"
-              >−</button>
-              <button
-                type="button"
-                className="canvas-tool-btn canvas-zoom-pct"
-                onClick={() => applyZoom(1)}
-                title="100% に戻す"
-              >{Math.round(zoom * 100)}%</button>
-              <button
-                type="button"
-                className="canvas-tool-btn"
-                onClick={() => applyZoom(zoom + ZOOM_STEP)}
-                disabled={zoom >= ZOOM_MAX}
-                title="拡大"
-              >+</button>
-            </div>
-          </div>
-
           <div
             className="pages-zoom-spacer"
             style={{ width: zoomW, height: zoomH }}
@@ -585,7 +692,6 @@ export default function App() {
                         showGrid={showGrid}
                         snapToGrid={snapToGrid}
                         rotationDeg={rotationDeg}
-                        appVersion="0.3.7"
                         showPortLabels
                         pageIdx={idx}
                         scale={BASE_SCALE}
@@ -630,6 +736,7 @@ export default function App() {
             widget={selectedWidget}
             selectedIds={selectedIds}
             widgets={widgets}
+            pages={pagesState.value}
             pageCount={pageCount}
             onUpdate={onUpdate}
             onUpdateMany={onUpdateMany}

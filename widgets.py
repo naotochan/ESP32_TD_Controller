@@ -15,6 +15,6 @@ PAGES = [
         {"type": "Slider", "x": 45, "y": 10, "w": 30, "h": 140, "osc_addr": "/esp32/slider/2", "default": 127},
         {"type": "Slider", "x": 150, "y": 10, "w": 30, "h": 140, "osc_addr": "/esp32/slider/3", "default": 127},
         {"type": "Slider", "x": 190, "y": 10, "w": 30, "h": 140, "osc_addr": "/esp32/slider/4", "default": 127},
-        {"type": "PageButton", "x": 10, "y": 260, "w": 60, "h": 30, "label": "PAGE 1", "nav_mode": "prev"},
+        {"type": "PageButton", "x": 10, "y": 260, "w": 60, "h": 30, "label": "PAGE 2", "nav_mode": "prev"},
     ],
 ]
