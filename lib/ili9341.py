@@ -120,10 +120,16 @@ class ILI9341:
         self.cs(1)
 
     def fill_rect(self, x, y, w, h, color):
-        if x >= self.width or y >= self.height or w <= 0 or h <= 0:
+        if w <= 0 or h <= 0:
             return
         x1 = min(x + w - 1, self.width - 1)
         y1 = min(y + h - 1, self.height - 1)
+        if x < 0:
+            x = 0
+        if y < 0:
+            y = 0
+        if x > x1 or y > y1:
+            return
         self._set_window(x, y, x1, y1)
         count = (x1 - x + 1) * (y1 - y + 1)
         c = bytes([(color >> 8) & 0xFF, color & 0xFF])
@@ -189,14 +195,48 @@ class ILI9341:
         '%': b'\x62\x66\x0C\x18\x30\x66\x46\x00',
     }
 
+    def _draw_char(self, ch, x, y, fg, bg, scale, size):
+        """Render one glyph as a single window + one SPI write."""
+        bmp = self._FONT.get(ch, self._FONT[' '])
+        x0 = x if x > 0 else 0
+        y0 = y if y > 0 else 0
+        x1 = min(x + size - 1, self.width - 1)
+        y1 = min(y + size - 1, self.height - 1)
+        row_bytes = (x1 - x0 + 1) * 2
+        buf = bytearray(row_bytes * (y1 - y0 + 1))
+
+        cols = range(x0 - x, x1 - x + 1)
+        row = bytearray(row_bytes)
+        last_font_row = -1
+        pos = 0
+        for sy in range(y0 - y, y1 - y + 1):
+            font_row = sy // scale
+            if font_row != last_font_row:
+                byte = bmp[font_row]
+                i = 0
+                for sx in cols:
+                    c = fg if (byte >> (7 - sx // scale)) & 1 else bg
+                    row[i] = c[0]
+                    row[i + 1] = c[1]
+                    i += 2
+                last_font_row = font_row
+            buf[pos:pos + row_bytes] = row
+            pos += row_bytes
+
+        self._set_window(x0, y0, x1, y1)
+        self._write_data(buf)
+
     def text(self, s, x, y, color=WHITE, bg=BLACK, scale=1):
+        if scale < 1:
+            return
+        size = 8 * scale
+        if y + size <= 0 or y >= self.height:
+            return
+        fg = bytes([(color >> 8) & 0xFF, color & 0xFF])
+        bgc = bytes([(bg >> 8) & 0xFF, bg & 0xFF])
         for ch in s.upper():
-            bmp = self._FONT.get(ch, self._FONT[' '])
-            for row, byte in enumerate(bmp):
-                for col in range(8):
-                    c = color if (byte >> (7 - col)) & 1 else bg
-                    if scale == 1:
-                        self.pixel(x + col, y + row, c)
-                    else:
-                        self.fill_rect(x + col * scale, y + row * scale, scale, scale, c)
-            x += 8 * scale
+            if x >= self.width:
+                break
+            if x + size > 0:
+                self._draw_char(ch, x, y, fg, bgc, scale, size)
+            x += size

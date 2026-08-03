@@ -21,6 +21,7 @@ __pycache__/
 # Build artifacts & caches
 .esphome/
 node_modules/
+ui-editor/.vite/
 
 # Local working dirs (tooling / claude-mem / lazyweb)
 .claude/
