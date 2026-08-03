@@ -9,6 +9,22 @@ const DEFAULT_COLOR_BY_TYPE = {
   HSlider: '#64b4ff',
 }
 
+const DEFAULT_TOGGLE_ON = '#1a5c42'
+const DEFAULT_TOGGLE_OFF = '#2a3038'
+
+function darkenHexPreview(hex, amount = 35) {
+  if (!hex || typeof hex !== 'string') return hex
+  const s = hex.startsWith('#') ? hex.slice(1) : hex
+  if (s.length !== 6) return hex
+  const n = Number.parseInt(s, 16)
+  if (Number.isNaN(n)) return hex
+  const clamp = (v) => Math.max(0, Math.min(255, v))
+  const r = clamp(((n >> 16) & 255) - amount)
+  const g = clamp(((n >> 8) & 255) - amount)
+  const b = clamp((n & 255) - amount)
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
+}
+
 function AlignIcon({ type }) {
   const s = { display: 'block', pointerEvents: 'none' }
   if (type === 'left') return (
@@ -225,28 +241,92 @@ export default function Properties({ widget, selectedIds, widgets, pages = [], p
       <h3>{widget.type}</h3>
       {field('Label', 'label', 'text', { dup: labelDup })}
       {widget.type !== 'PageButton' && field('OSC Address', 'osc_addr', 'text', { dup: oscDup })}
-      <div className="prop-field">
-        <label>Color</label>
-        <div className="color-row">
-          <input
-            type="color"
-            className="color-input"
-            value={widget.color || DEFAULT_COLOR_BY_TYPE[widget.type] || '#3a5080'}
-            onChange={(e) => onUpdate(widget.id, { color: e.target.value })}
-            title="ウィジェット色"
-          />
-          <span className="color-hex">
-            {widget.color || 'デフォルト'}
-          </span>
-          <button
-            type="button"
-            className="color-reset-btn"
-            disabled={!widget.color}
-            onClick={() => onUpdate(widget.id, { color: null })}
-            title="タイプ標準色に戻す"
-          >デフォルト</button>
+      {widget.type === 'Toggle' ? (
+        <>
+          <div className="prop-field">
+            <label>Color ON</label>
+            <div className="color-row">
+              <input
+                type="color"
+                className="color-input"
+                value={widget.color_on || widget.color || DEFAULT_TOGGLE_ON}
+                onChange={(e) => {
+                  const patch = { color_on: e.target.value, color: null }
+                  if (!widget.color_off && widget.color) {
+                    patch.color_off = darkenHexPreview(widget.color)
+                  }
+                  onUpdate(widget.id, patch)
+                }}
+                title="ON 時の色"
+              />
+              <span className="color-hex">
+                {widget.color_on || (widget.color ? `${widget.color} (旧)` : 'デフォルト')}
+              </span>
+              <button
+                type="button"
+                className="color-reset-btn"
+                disabled={!widget.color_on && !widget.color}
+                onClick={() => onUpdate(widget.id, { color_on: null, color: null })}
+                title="標準色に戻す"
+              >デフォルト</button>
+            </div>
+          </div>
+          <div className="prop-field">
+            <label>Color OFF</label>
+            <div className="color-row">
+              <input
+                type="color"
+                className="color-input"
+                value={
+                  widget.color_off
+                  || (widget.color ? darkenHexPreview(widget.color) : DEFAULT_TOGGLE_OFF)
+                }
+                onChange={(e) => {
+                  const patch = { color_off: e.target.value, color: null }
+                  if (!widget.color_on && widget.color) {
+                    patch.color_on = widget.color
+                  }
+                  onUpdate(widget.id, patch)
+                }}
+                title="OFF 時の色"
+              />
+              <span className="color-hex">
+                {widget.color_off || (widget.color ? '自動 (旧)' : 'デフォルト')}
+              </span>
+              <button
+                type="button"
+                className="color-reset-btn"
+                disabled={!widget.color_off}
+                onClick={() => onUpdate(widget.id, { color_off: null })}
+                title="標準色に戻す"
+              >デフォルト</button>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="prop-field">
+          <label>Color</label>
+          <div className="color-row">
+            <input
+              type="color"
+              className="color-input"
+              value={widget.color || DEFAULT_COLOR_BY_TYPE[widget.type] || '#3a5080'}
+              onChange={(e) => onUpdate(widget.id, { color: e.target.value })}
+              title="ウィジェット色"
+            />
+            <span className="color-hex">
+              {widget.color || 'デフォルト'}
+            </span>
+            <button
+              type="button"
+              className="color-reset-btn"
+              disabled={!widget.color}
+              onClick={() => onUpdate(widget.id, { color: null })}
+              title="タイプ標準色に戻す"
+            >デフォルト</button>
+          </div>
         </div>
-      </div>
+      )}
       {widget.type === 'PageButton' && (
         <>
           <div className="prop-field">
@@ -297,7 +377,7 @@ export default function Properties({ widget, selectedIds, widgets, pages = [], p
 
       {widget.type === 'Toggle' && (
         <div className="prop-field">
-          <label>初期状態</label>
+          <label>初期状態 / プレビュー</label>
           <div className="nav-mode-group">
             <button
               className={`nav-mode-btn ${!widget.default ? 'active' : ''}`}
@@ -308,6 +388,7 @@ export default function Properties({ widget, selectedIds, widgets, pages = [], p
               onClick={() => onUpdate(widget.id, { default: 1 })}
             >ON</button>
           </div>
+          <p className="prop-hint">キャンバスでダブルクリックしても切替できます</p>
         </div>
       )}
 

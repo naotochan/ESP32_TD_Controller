@@ -364,6 +364,7 @@ export default function Canvas({
             widget={w}
             isSelected={selectedIds.includes(w.id)}
             onPointerDown={handlePointerDown}
+            onUpdate={onUpdate}
             scale={scale}
             pageIdx={pageIdx}
           />
@@ -408,7 +409,7 @@ export default function Canvas({
   )
 }
 
-function WidgetView({ widget, isSelected, onPointerDown, scale, pageIdx = 0 }) {
+function WidgetView({ widget, isSelected, onPointerDown, onUpdate, scale, pageIdx = 0 }) {
   const style = {
     position: 'absolute',
     left: widget.x * scale,
@@ -438,24 +439,48 @@ function WidgetView({ widget, isSelected, onPointerDown, scale, pageIdx = 0 }) {
 
   if (widget.type === 'Toggle') {
     const isOn = !!widget.default
-    const togStyle = custom
-      ? {
-          ...style,
-          background: isOn ? lightenHex(custom, 28) : darkenHex(custom, 28),
-          boxShadow: isOn ? `inset 0 0 0 2px ${lightenHex(custom, 90)}` : 'none',
-        }
-      : style
+    const onColor = widget.color_on || null
+    const offColor = widget.color_off || null
+    const hasSplit = !!(onColor || offColor)
+    let togStyle = style
+    let indicatorStyle
+    if (hasSplit) {
+      const bgOn = onColor || (custom ? custom : '#1a5c42')
+      const bgOff = offColor || (custom ? darkenHex(custom, 35) : '#2a3038')
+      const bg = isOn ? bgOn : bgOff
+      togStyle = {
+        ...style,
+        background: bg,
+        boxShadow: isOn ? `inset 0 0 0 2px ${lightenHex(bgOn, 90)}` : 'none',
+      }
+      indicatorStyle = {
+        background: isOn ? lightenHex(bgOn, 80) : lightenHex(bgOff, 40),
+      }
+    } else if (custom) {
+      togStyle = {
+        ...style,
+        background: isOn ? lightenHex(custom, 28) : darkenHex(custom, 28),
+        boxShadow: isOn ? `inset 0 0 0 2px ${lightenHex(custom, 90)}` : 'none',
+      }
+      indicatorStyle = { background: lightenHex(custom, 80) }
+    }
     return (
       <div
         className={`canvas-widget canvas-widget-toggle ${isOn ? 'toggle-on' : ''} ${isSelected ? 'selected' : ''}`}
         style={togStyle}
+        title="ダブルクリックで ON/OFF 切替"
         onPointerDown={(e) => onPointerDown(e, widget.id, 'move')}
+        onDoubleClick={(e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          onUpdate?.(widget.id, { default: widget.default ? 0 : 1 })
+        }}
       >
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tl" />
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="tr" />
         <span
           className="toggle-indicator"
-          style={custom ? { background: lightenHex(custom, 80) } : undefined}
+          style={indicatorStyle}
         />
         <span className="widget-label">{widget.label || 'TOG'}</span>
         <ResizeHandle widgetId={widget.id} onPointerDown={onPointerDown} corner="bl" />

@@ -146,13 +146,39 @@ class Toggle(Widget):
     _OFF_BORDER = color565(120, 130, 150)
     _PRESS_BG   = color565(40, 140, 100)
 
-    def __init__(self, tft, x, y, w, h, label, osc_addr, default=0, color=None):
+    def __init__(self, tft, x, y, w, h, label, osc_addr, default=0,
+                 color=None, color_on=None, color_off=None):
         super().__init__(tft, x, y, w, h, osc_addr)
         self.label = label
         self._on = bool(default)
         self._pending_osc = False
-        rgb = _parse_hex_rgb(color)
-        if rgb:
+        rgb_on = _parse_hex_rgb(color_on)
+        rgb_off = _parse_hex_rgb(color_off)
+        rgb = _parse_hex_rgb(color)  # legacy single color
+
+        if rgb_on or rgb_off:
+            if rgb_on:
+                self._on_bg = _rgb565(rgb_on)
+                self._press_bg = _rgb565(_lighten(rgb_on, 30))
+                self._on_border = _rgb565(_lighten(rgb_on, 90))
+            elif rgb:
+                self._on_bg = _rgb565(rgb)
+                self._press_bg = _rgb565(_lighten(rgb, 30))
+                self._on_border = _rgb565(_lighten(rgb, 90))
+            else:
+                self._on_bg = self._ON_BG
+                self._press_bg = self._PRESS_BG
+                self._on_border = self._ON_BORDER
+            if rgb_off:
+                self._off_bg = _rgb565(rgb_off)
+                self._off_border = _rgb565(_lighten(rgb_off, 40))
+            elif rgb:
+                self._off_bg = _rgb565(_darken(rgb, 35))
+                self._off_border = _rgb565(_lighten(_darken(rgb, 20), 40))
+            else:
+                self._off_bg = self._OFF_BG
+                self._off_border = self._OFF_BORDER
+        elif rgb:
             # OFF = darker base, ON = brighter, press = mid
             self._off_bg = _rgb565(_darken(rgb, 35))
             self._on_bg = _rgb565(rgb)

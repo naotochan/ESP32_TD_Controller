@@ -35,7 +35,7 @@ const AUTOSAVE_DELAY_MS = 300
 const ZOOM_MIN = 0.5
 const ZOOM_MAX = 2
 const ZOOM_STEP = 0.05
-/** Wheel/trackpad pinch: pixel delta → zoom (macOS pinch arrives as ctrl+wheel) */
+/** Wheel/trackpad: pixel delta → zoom (pinch also arrives as wheel) */
 const ZOOM_WHEEL_FACTOR = 0.0015
 
 function clampZoom(z) {
@@ -251,7 +251,6 @@ export default function App() {
   }, [])
 
   const onCanvasAreaWheel = useCallback((e) => {
-    if (!(e.ctrlKey || e.metaKey)) return
     e.preventDefault()
     lastPointerRef.current = { clientX: e.clientX, clientY: e.clientY }
     const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY
@@ -441,8 +440,10 @@ export default function App() {
     updatePage(prev => prev.map((w) => {
       if (w.id !== id) return w
       const next = { ...w, ...changes }
-      if ('color' in changes && (changes.color == null || changes.color === '')) {
-        delete next.color
+      for (const key of ['color', 'color_on', 'color_off']) {
+        if (key in changes && (changes[key] == null || changes[key] === '')) {
+          delete next[key]
+        }
       }
       return next
     }))
@@ -616,7 +617,7 @@ export default function App() {
             title="スナップ"
           >Snap</button>
           <div className="canvas-toolbar-sep" />
-          <div className="canvas-zoom-group" title="ズーム (Ctrl/⌘ + ホイール)">
+          <div className="canvas-zoom-group" title="ズーム (スクロール / ピンチ)">
             <button
               type="button"
               className="canvas-tool-btn"
