@@ -1126,6 +1126,13 @@
   color: var(--accent-danger);
 }
 
+.prop-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.35;
+}
+
 .color-row {
   display: flex;
   align-items: center;
