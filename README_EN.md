@@ -18,7 +18,7 @@ Touch interactions (buttons, toggles, sliders, color pickers, page switching) ar
                                                            └─────────────┘
 ```
 
-**Version:** 0.6.2
+**Version:** 0.7.0
 
 ---
 
@@ -121,6 +121,13 @@ Not the same as ESP32 **pages**. Rising edges on `button/1`–`button/4` set `sc
 | button/2 | 1 |
 | button/3 | 2 |
 | button/4 | 3 |
+
+#### Setup / edit from TD (v0.7.0)
+
+- COMP: `td/CYD_TD_Controller.tox` (first time: run `td/install_editor_controls.py` in the TD Textport to generate it; see `td/README.md`)
+- Editor page: Project Dir = this repo, Start Setup / Stop Setup / Edit CYD / Refresh Status
+- CLI alternative: `python3 editor_ctl.py start|stop|status|open` (deploy server :3737 + Vite :5173)
+- Interactive `./start.sh` still works as before (Ctrl+C to quit)
 
 ---
 

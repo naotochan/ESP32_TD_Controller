@@ -17,6 +17,8 @@ __pycache__/
 # OS / editor
 .DS_Store
 *.log
+.editor.pids
+.editor_logs/
 
 # Build artifacts & caches
 .esphome/

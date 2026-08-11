@@ -18,7 +18,7 @@ ESP32 + 2.8インチタッチスクリーンを **TouchDesigner 向け OSC コ�
                                                            └─────────────┘
 ```
 
-**Version:** 0.6.2
+**Version:** 0.7.0
 
 ---
 
@@ -121,6 +121,13 @@ ESP32 の **Page とは別**。`button/1`〜`button/4` の立ち上がりで `sc
 | button/2 | 1 |
 | button/3 | 2 |
 | button/4 | 3 |
+
+#### TD からセットアップ / 編集 (v0.7.0)
+
+- COMP: `td/CYD_TD_Controller.tox`（初回は `td/install_editor_controls.py` を TD Textport で実行して生成。詳細は `td/README.md`）
+- Editor ページ: Project Dir = このリポジトリ、Start Setup / Stop Setup / Edit CYD / Refresh Status
+- CLI でも可: `python3 editor_ctl.py start|stop|status|open`（deploy server :3737 + Vite :5173）
+- 対話用の `./start.sh` は従来どおり（Ctrl+C で終了）
 
 ---
 
