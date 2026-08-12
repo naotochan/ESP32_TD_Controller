@@ -177,6 +177,17 @@
   box-shadow: 0 2px 8px rgba(99,102,241,0.3);
 }
 
+.export-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.export-btn:disabled:hover {
+  background: var(--accent-primary);
+  filter: none;
+}
+
 .device-status {
   font-size: 11px;
   font-family: monospace;
@@ -212,6 +223,17 @@
 .export-btn.deploy:hover {
   filter: brightness(1.1);
   box-shadow: 0 2px 8px rgba(16,185,129,0.35);
+}
+
+.export-btn.flash {
+  background: var(--bg-element);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+
+.export-btn.flash:hover:not(:disabled) {
+  background: var(--bg-hover);
+  box-shadow: none;
 }
 
 .export-btn.secondary {

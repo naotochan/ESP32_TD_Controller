@@ -113,6 +113,50 @@ export default function ExportButton({ pages, rotationDeg = 0, onLoad }) {
     }
   }
 
+  const flashDisabled =
+    !deviceStatus ||
+    (deviceStatus.count ?? 0) === 0 ||
+    Boolean(deviceStatus.ambiguous)
+
+  let flashTitle
+  if (!deviceStatus) {
+    flashTitle = 'デプロイサーバー未起動'
+  } else if ((deviceStatus.count ?? 0) === 0) {
+    flashTitle = 'ESP32 が USB 接続されていません'
+  } else if (deviceStatus.ambiguous) {
+    flashTitle = '複数のシリアルポートが検出されています。余分な機器を外してください'
+  }
+
+  const handleFlash = async () => {
+    const ok = window.confirm(
+      'MicroPython ファームウェアを焼き込みます。\n\n' +
+        'フラッシュは全消去されます。既存のファイルとレイアウトは失われます。\n' +
+        '焼き込み後は ./deploy.sh または Deploy で再転送してください。\n\n' +
+        '続行しますか？'
+    )
+    if (!ok) return
+
+    setStatus('焼き込み中...')
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 300000)
+    try {
+      const res = await fetch('http://localhost:3737/flash-micropython', {
+        method: 'POST',
+        signal: controller.signal,
+      })
+      clearTimeout(timer)
+      const msg = await res.text()
+      showStatus(res.ok ? `✓ ${msg}` : `✗ ${msg}`, 8000)
+    } catch (e) {
+      clearTimeout(timer)
+      if (e.name === 'AbortError') {
+        showStatus('✗ タイムアウト（USB 接続を確認）', 8000)
+      } else {
+        showStatus('✗ サーバー未起動 (start.sh)', 5000)
+      }
+    }
+  }
+
   const handleDeploy = async () => {
     if (!confirmWarnings('Deploy')) return
 
@@ -190,6 +234,14 @@ export default function ExportButton({ pages, rotationDeg = 0, onLoad }) {
       <div className="export-sep" />
       <button className="export-btn deploy" onClick={handleDeploy}>
         📡 Deploy
+      </button>
+      <button
+        className="export-btn flash"
+        onClick={handleFlash}
+        disabled={flashDisabled}
+        title={flashTitle}
+      >
+        Flash MicroPython
       </button>
       <div className="export-sep" />
       <button className="export-btn secondary" onClick={handleLoadJson}>

@@ -18,7 +18,7 @@ ESP32 + 2.8インチタッチスクリーンを **TouchDesigner 向け OSC コ�
                                                            └─────────────┘
 ```
 
-**Version:** 0.6.2
+**Version:** 0.11.0
 
 ---
 
@@ -122,6 +122,15 @@ ESP32 の **Page とは別**。`button/1`〜`button/4` の立ち上がりで `sc
 | button/3 | 2 |
 | button/4 | 3 |
 
+#### TD からセットアップ / 編集 (v0.11.0)
+
+1. `td/CYD_TD_Controller.tox` を `.toe` にドロップ（初回は `td/install_editor_controls.py` を TD Textport で実行して生成。詳細は `td/README.md`）
+2. **Project Dir** は既定で `.toe` フォルダ（`project.folder`）
+3. **Setup** パルス → 必要なら `CYD_TD_Controller/` に shallow clone + `uv sync` + `.env` テンプレ + `npm install`（サーバーは起動しない）
+4. **Setup Ready** が `ready` になったら **Run** ON → デプロイサーバー + Vite 起動 / **Edit CYD** / **Refresh Status**
+- **Flash MicroPython** は Web エディタ（Deploy 横）から実行。CLI: `python3 editor_ctl.py flash`
+- CLI: `python3 editor_ctl.py setup|start|stop|status|open`
+
 ---
 
 ## 二回目以降の手順
@@ -135,7 +144,7 @@ ESP32 の **Page とは別**。`button/1`〜`button/4` の立ち上がりで `sc
 # → エディタ (http://localhost:5173) と deploy server (port 3737) が同時起動
 ```
 
-ブラウザで widget をドラッグ&ドロップで配置・編集 → 「**Deploy**」ボタンで `layout.json` が ESP32 に転送され、自動再起動します。エディタ右上に **ESP32 接続状態**（候補数 / 使用ポート）が表示されます。複数ポートで曖昧なときは警告が出ます。
+ブラウザで widget をドラッグ&ドロップで配置・編集 → 「**Deploy**」ボタンで `layout.json` が ESP32 に転送され、自動再起動します。**Flash MicroPython**（Deploy 横）でファームウェアの全消去＋焼き直しも可能です。エディタ右上に **ESP32 接続状態**（候補数 / 使用ポート）が表示されます。複数ポートで曖昧なときは警告が出ます。
 
 ### CLI から layout だけデプロイしたいとき
 
