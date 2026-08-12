@@ -16,14 +16,139 @@ ALLOWED_HOSTS = ("localhost", "127.0.0.1", "::1")
 MAX_BODY = 1 << 20  # 1 MiB
 WIDGET_TYPES = ("Button", "Toggle", "Slider", "HSlider", "PageButton")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-MPREMOTE = os.path.join(SCRIPT_DIR, ".venv", "bin", "mpremote")
+
+
+def _mpremote_path() -> str:
+    venv = os.path.join(SCRIPT_DIR, ".venv")
+    if sys.platform == "win32":
+        candidates = (
+            os.path.join(venv, "Scripts", "mpremote.exe"),
+            os.path.join(venv, "Scripts", "mpremote"),
+        )
+    else:
+        candidates = (os.path.join(venv, "bin", "mpremote"),)
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return candidates[0]
+
+
+MPREMOTE = _mpremote_path()
 LAYOUT_FILE = os.path.join(SCRIPT_DIR, "layout.json")
 LAYOUT_EXAMPLE = os.path.join(SCRIPT_DIR, "layout.json.example")
 MAIN_FILE = os.path.join(SCRIPT_DIR, "main.py")
+FIRMWARE_BIN = os.path.join(SCRIPT_DIR, "micropython_esp32.bin")
+ESPTOOL_TIMEOUT = 120
+
+
+def _venv_python_path() -> str | None:
+    if sys.platform == "win32":
+        path = os.path.join(SCRIPT_DIR, ".venv", "Scripts", "python.exe")
+    else:
+        path = os.path.join(SCRIPT_DIR, ".venv", "bin", "python")
+    return path if os.path.isfile(path) else None
+
+
+def _venv_python() -> str | None:
+    """Return venv python path (win Scripts/python.exe, else bin/python)."""
+    return _venv_python_path()
+
+
+def _run_esptool(args: list[str], timeout: int = ESPTOOL_TIMEOUT) -> subprocess.CompletedProcess:
+    py = _venv_python()
+    if not py:
+        raise FileNotFoundError("venv python not found")
+    return subprocess.run(
+        [py, "-m", "esptool", *args],
+        cwd=SCRIPT_DIR,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def _venv_site_packages() -> str | None:
+    venv = os.path.join(SCRIPT_DIR, ".venv")
+    if sys.platform == "win32":
+        candidates = glob.glob(os.path.join(venv, "Lib", "site-packages"))
+    else:
+        py_ver = f"python{sys.version_info.major}.{sys.version_info.minor}"
+        candidates = glob.glob(os.path.join(venv, "lib", py_ver, "site-packages"))
+    return candidates[0] if candidates else None
+
+
+def _comports_via_pyserial() -> list[str]:
+    from serial.tools import list_ports as _lp
+
+    return sorted({p.device for p in _lp.comports()})
+
+
+def _comports_via_venv_site_packages() -> list[str] | None:
+    site = _venv_site_packages()
+    if not site:
+        return None
+    inserted = site not in sys.path
+    if inserted:
+        sys.path.insert(0, site)
+    try:
+        return _comports_via_pyserial()
+    except Exception:
+        return None
+    finally:
+        if inserted:
+            try:
+                sys.path.remove(site)
+            except ValueError:
+                pass
+
+
+def _comports_via_venv_subprocess() -> list[str] | None:
+    py = _venv_python_path()
+    if not py:
+        return None
+    script = (
+        "from serial.tools import list_ports; "
+        "print('\\n'.join(sorted({p.device for p in list_ports.comports()})))"
+    )
+    try:
+        result = subprocess.run(
+            [py, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    ports = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return sorted(set(ports))
+
+
+def _list_ports_windows() -> list[str]:
+    try:
+        return _comports_via_pyserial()
+    except Exception:
+        pass
+
+    ports = _comports_via_venv_site_packages()
+    if ports is not None:
+        return ports
+
+    ports = _comports_via_venv_subprocess()
+    if ports is not None:
+        return ports
+
+    return []
 
 
 def list_ports():
-    """Return sorted unique serial port candidates (macOS + Linux)."""
+    """Return sorted unique serial port candidates."""
+    if sys.platform == "win32":
+        return _list_ports_windows()
+
     patterns = [
         "/dev/cu.usbserial-*",
         "/dev/cu.usbmodem*",
@@ -155,11 +280,15 @@ class Handler(BaseHTTPRequestHandler):
         if not self._origin_allowed():
             self._respond(403, "Forbidden origin")
             return
-        if self.path != "/deploy":
+        if self.path == "/deploy":
+            self._handle_deploy()
+        elif self.path == "/flash-micropython":
+            self._handle_flash_micropython()
+        else:
             self.send_response(404)
             self.end_headers()
-            return
 
+    def _handle_deploy(self):
         try:
             length = int(self.headers.get("Content-Length", 0))
         except ValueError:
@@ -227,6 +356,68 @@ class Handler(BaseHTTPRequestHandler):
             self._respond(200, f"Deployed to {esp_port}")
         else:
             self._respond(500, result.stderr or "Deploy failed")
+
+    def _handle_flash_micropython(self):
+        esp_port, ports, ambiguous = select_port()
+        if not ports:
+            self._respond(503, "ESP32 not found. Connect via USB.")
+            return
+        if ambiguous or not esp_port:
+            listing = ", ".join(ports)
+            self._respond(
+                503,
+                f"Multiple serial ports ({len(ports)}): {listing}. "
+                f"Disconnect extras or use ./deploy-layout.sh <port>",
+            )
+            return
+
+        if not os.path.isfile(FIRMWARE_BIN):
+            self._respond(500, f"{os.path.basename(FIRMWARE_BIN)} not found")
+            return
+
+        if not _venv_python():
+            self._respond(500, "venv python not found — run 'uv sync' first")
+            return
+
+        try:
+            erase = _run_esptool(["--port", esp_port, "erase_flash"])
+        except subprocess.TimeoutExpired:
+            self._respond(504, "erase_flash timed out — check USB connection")
+            return
+        except FileNotFoundError:
+            self._respond(500, "esptool not found — run 'uv sync' first")
+            return
+
+        if erase.returncode != 0:
+            combined = ((erase.stderr or "") + (erase.stdout or "")).strip()
+            self._respond(500, combined[:500] or "erase_flash failed")
+            return
+
+        try:
+            write = _run_esptool(
+                [
+                    "--port",
+                    esp_port,
+                    "--baud",
+                    "460800",
+                    "write_flash",
+                    "0x1000",
+                    FIRMWARE_BIN,
+                ]
+            )
+        except subprocess.TimeoutExpired:
+            self._respond(504, "write_flash timed out — check USB connection")
+            return
+        except FileNotFoundError:
+            self._respond(500, "esptool not found — run 'uv sync' first")
+            return
+
+        if write.returncode != 0:
+            combined = ((write.stderr or "") + (write.stdout or "")).strip()
+            self._respond(500, combined[:500] or "write_flash failed")
+            return
+
+        self._respond(200, f"Flashed MicroPython to {esp_port}")
 
     def _respond(self, code, message):
         body = message.encode()
