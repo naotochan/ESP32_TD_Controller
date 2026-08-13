@@ -18,7 +18,7 @@ Touch interactions (buttons, toggles, sliders, color pickers, page switching) ar
                                                            └─────────────┘
 ```
 
-**Version:** 0.11.0
+**Version:** 0.12.10
 
 ---
 
@@ -122,13 +122,14 @@ Not the same as ESP32 **pages**. Rising edges on `button/1`–`button/4` set `sc
 | button/3 | 2 |
 | button/4 | 3 |
 
-#### Setup / edit from TD (v0.11.0)
+#### Setup / edit from TD (v0.12.0)
 
 1. Drop `td/CYD_TD_Controller.tox` into your `.toe` (first time: run `td/install_editor_controls.py` in the TD Textport to generate it; see `td/README.md`)
 2. **Project Dir** defaults to the `.toe` folder (`project.folder`)
-3. Pulse **Setup** → shallow-clone into `CYD_TD_Controller/` when needed + `uv sync` + `.env` template + `npm install` (does not start servers)
-4. When **Setup Ready** is `ready`, toggle **Run** ON for deploy server + Vite / **Edit CYD** / **Refresh Status**
-- **Flash MicroPython** is in the Web editor (next to Deploy). CLI: `python3 editor_ctl.py flash`
+3. Pulse **Setup** → shallow-clone into `CYD_TD_Controller/` when needed + `uv sync` + `.env` template + `npm install` (does not start servers). **Setup Status** (`Setupstatus`, under **Setup**) is `complete` or `incomplete`. **Status** (`Runstatus`, under **Run**) shows `running (http://localhost:5173)` or `stopped`.
+4. After **Setup** succeeds, toggle **Run** ON for deploy server + Vite; **Refresh Status** unlocks. **Edit CYD** unlocks only while **Run** is ON.  
+   Until setup completes, **Run**, **Edit CYD**, and **Refresh Status** are disabled — pulse **Setup** first.
+- **Flash MicroPython** is Web-editor only (next to Deploy). CLI: `python3 editor_ctl.py flash`. The TD **Flashmicropython** parameter was removed in v0.12.4.
 - CLI: `python3 editor_ctl.py setup|start|stop|status|open`
 
 ---

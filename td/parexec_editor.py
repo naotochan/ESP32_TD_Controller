@@ -8,10 +8,6 @@ def onPulse(par):
 
     if name == "Setup":
         ext.Setup()
-    elif name == "Startsetup":
-        ext.Setup()
-    elif name == "Stopsetup":
-        ext.StopSetup()
     elif name == "Editcyd":
         ext.EditCyd()
     elif name == "Refreshstatus":

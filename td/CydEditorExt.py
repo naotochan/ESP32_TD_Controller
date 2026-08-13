@@ -10,9 +10,9 @@ import sys
 
 SERVER_PORT = 3737
 VITE_PORT = 5173
-FALLBACK_VERSION = "0.11.0"
+FALLBACK_VERSION = "0.12.10"
 REPO_CLONE_URL = "https://github.com/naotochan/CYD_TD_Controller.git"
-REPO_CLONE_REF = "cursor/td-editor-control-f789"  # switch to "main" after merge
+REPO_CLONE_REF = "main"
 CLONE_DIRNAME = "CYD_TD_Controller"
 SETUP_TIMEOUT = 900
 UV_SYNC_TIMEOUT = 300
@@ -30,17 +30,90 @@ class CydEditorExt:
     def __init__(self, ownerComp):
         self.ownerComp = ownerComp
         self._syncing_run = False
+        self._gating = False
         self._last_ctl_data = None
+        self._setup_ready = False
 
     def _set_setupstatus(self, msg: str) -> None:
         par = getattr(self.ownerComp.par, "Setupstatus", None)
         if par is not None:
             par.val = (msg or "")[:500]
 
+    def _write_setup_status_flag(self) -> None:
+        self._set_setupstatus("complete" if self._setup_ready else "incomplete")
+
+    def _set_runstatus(self, msg: str) -> None:
+        par = getattr(self.ownerComp.par, "Runstatus", None)
+        if par is not None:
+            par.val = (msg or "")[:500]
+
+    def _ctl_progress_message(self, cmd: str) -> str | None:
+        return {
+            "start": "starting editor...",
+            "stop": "stopping editor...",
+            "open": "opening editor...",
+            "flash": "flashing...",
+        }.get(cmd)
+
     def _set_par_str(self, name: str, value: str) -> None:
         par = getattr(self.ownerComp.par, name, None)
         if par is not None:
             par.val = (value or "")[:500]
+
+    def _setup_is_ready(self) -> bool:
+        return bool(self._setup_ready)
+
+    def _set_par_enable(self, name: str, enabled: bool) -> None:
+        par = getattr(self.ownerComp.par, name, None)
+        if par is not None and hasattr(par, "enable"):
+            try:
+                par.enable = bool(enabled)
+            except Exception:
+                pass
+
+    def _destroy_legacy_setup_pulses(self) -> None:
+        for name in ("Startsetup", "Stopsetup", "Setupready", "Flashmicropython"):
+            par = getattr(self.ownerComp.par, name, None)
+            if par is None:
+                continue
+            try:
+                par.destroy()
+            except Exception:
+                self._set_par_enable(name, False)
+
+    def _sync_editor_gates(
+        self, setup_ready: bool | None = None, *, stop_if_running: bool = False
+    ) -> None:
+        if self._gating:
+            return
+        self._gating = True
+        try:
+            self._destroy_legacy_setup_pulses()
+            if setup_ready is None:
+                setup_ready = self._setup_is_ready()
+            self._set_par_enable("Setup", True)
+            self._set_par_enable("Run", bool(setup_ready))
+            self._set_par_enable("Refreshstatus", bool(setup_ready))
+            run_par = getattr(self.ownerComp.par, "Run", None)
+            run_on = bool(run_par.eval()) if run_par is not None else False
+            self._set_par_enable("Editcyd", bool(setup_ready) and run_on)
+            if stop_if_running and not setup_ready:
+                run_par = getattr(self.ownerComp.par, "Run", None)
+                if run_par is not None and bool(run_par.eval()):
+                    self._syncing_run = True
+                    try:
+                        run_par.val = False
+                    finally:
+                        self._syncing_run = False
+                    try:
+                        self._run_ctl("stop", quiet=True)
+                    except Exception:
+                        pass
+                    self._write_setup_status_flag()
+        finally:
+            self._gating = False
+            if stop_if_running and self._setup_is_ready():
+                self._sync_editor_gates(True, stop_if_running=False)
 
     def _human_status_from_data(self, data: dict) -> str:
         running = bool(data.get("running"))
@@ -93,25 +166,20 @@ class CydEditorExt:
 
         return (not missing), missing
 
-    def _apply_status(self, data: dict, *, update_setupstatus: bool = True) -> str:
+    def _apply_status(
+        self, data: dict, *, update_runstatus: bool = True, sync_gates: bool = True
+    ) -> str:
         if "setup_ready" not in data:
             probe_dir = self._status_probe_dir(data)
             if probe_dir:
-                setup_ready, missing = self._probe_setup_status(probe_dir)
+                setup_ready, _ = self._probe_setup_status(probe_dir)
             else:
                 setup_ready = False
-                missing = []
         else:
             setup_ready = bool(data.get("setup_ready"))
-            missing = data.get("missing") or []
 
-        if setup_ready:
-            setupready = "ready"
-        elif missing:
-            setupready = "incomplete: " + ", ".join(missing)
-        else:
-            setupready = "unknown"
-        self._set_par_str("Setupready", setupready)
+        self._setup_ready = setup_ready
+        self._write_setup_status_flag()
 
         port = data.get("port")
         ports = data.get("ports") or []
@@ -129,8 +197,8 @@ class CydEditorExt:
         self._set_par_str("Serialport", serialport)
 
         status = self._human_status_from_data(data)
-        if update_setupstatus:
-            self._set_setupstatus(status)
+        if update_runstatus:
+            self._set_runstatus(status)
 
         run_par = getattr(self.ownerComp.par, "Run", None)
         if run_par is not None:
@@ -140,11 +208,9 @@ class CydEditorExt:
             finally:
                 self._syncing_run = False
 
-        flash_par = getattr(self.ownerComp.par, "Flashmicropython", None)
-        if flash_par is not None and hasattr(flash_par, "enable"):
-            flash_par.enable = False
-
         self.UpdateViewer(data)
+        if sync_gates:
+            self._sync_editor_gates(setup_ready, stop_if_running=True)
         return status
 
     def _toe_folder_runtime(self) -> str:
@@ -181,6 +247,7 @@ class CydEditorExt:
         ]
         if prepend:
             env["PATH"] = os.pathsep.join(prepend + parts)
+        env["PYTHONIOENCODING"] = "utf-8"
         return env
 
     def _find_executable(self, name: str, *, extra_candidates: tuple = ()) -> str | None:
@@ -260,7 +327,6 @@ class CydEditorExt:
 
     def _ensure_deps_fallback(self, repo_root: str) -> None:
         """Install deps when cloned editor_ctl lacks setup subcommand."""
-        self._set_setupstatus("installing Python deps (uv sync)...")
         uv = self._find_uv()
         if not uv:
             raise RuntimeError(
@@ -272,6 +338,8 @@ class CydEditorExt:
                 [uv, "sync"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=UV_SYNC_TIMEOUT,
                 cwd=repo_root,
                 env=self._subprocess_env(),
@@ -288,14 +356,12 @@ class CydEditorExt:
 
         env_path = os.path.join(repo_root, ".env")
         if not os.path.isfile(env_path):
-            self._set_setupstatus("creating .env template...")
             with open(env_path, "w", encoding="utf-8") as fh:
                 fh.write(ENV_TEMPLATE)
 
         ui_editor = os.path.join(repo_root, "ui-editor")
         vite_marker = os.path.join(ui_editor, "node_modules", "vite")
         if os.path.isdir(ui_editor) and not os.path.isdir(vite_marker):
-            self._set_setupstatus("installing ui-editor deps (npm install)...")
             npm = self._find_npm()
             if not npm:
                 raise RuntimeError(
@@ -306,6 +372,8 @@ class CydEditorExt:
                     [npm, "install"],
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=NPM_INSTALL_TIMEOUT,
                     cwd=ui_editor,
                     env=self._subprocess_env(),
@@ -322,8 +390,6 @@ class CydEditorExt:
                 raise RuntimeError(
                     "npm install finished but vite is still missing in ui-editor"
                 )
-
-        self._set_setupstatus("deps installed")
 
     def _resolve_base_dir(self) -> str:
         """Projectdir or .toe folder — does not require editor_ctl.py."""
@@ -355,6 +421,8 @@ class CydEditorExt:
                 [git, *args],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=SETUP_TIMEOUT,
                 cwd=cwd,
                 env=self._subprocess_env(),
@@ -387,7 +455,6 @@ class CydEditorExt:
         if not os.path.isdir(git_dir):
             return False
 
-        self._set_setupstatus("repairing incomplete clone...")
         fetch = self._run_git(git, ["fetch", "origin", REPO_CLONE_REF], cwd=clone_path)
         if fetch.returncode != 0:
             return False
@@ -416,7 +483,6 @@ class CydEditorExt:
             if os.listdir(clone_path):
                 if self._try_repair_incomplete_clone(git, clone_path):
                     return clone_path
-                self._set_setupstatus("re-cloning...")
                 shutil.rmtree(clone_path)
             else:
                 try:
@@ -427,7 +493,6 @@ class CydEditorExt:
                     ) from exc
 
         os.makedirs(base_dir, exist_ok=True)
-        self._set_setupstatus(f"cloning {CLONE_DIRNAME}...")
         self._fresh_git_clone(git, base_dir)
 
         if not self._has_editor_ctl(clone_path):
@@ -480,9 +545,10 @@ class CydEditorExt:
             ) from exc
 
     def _mark_project_dir_error(self, msg: str) -> None:
-        self._set_setupstatus(msg)
-        self._set_par_str("Setupready", "incomplete: project dir")
+        self._setup_ready = False
+        self._write_setup_status_flag()
         self.UpdateViewer()
+        self._sync_editor_gates(False, stop_if_running=True)
 
     def _port_open(self, host: str, port: int, timeout: float = 0.3) -> bool:
         try:
@@ -535,66 +601,38 @@ class CydEditorExt:
                     pass
         return FALLBACK_VERSION
 
-    @staticmethod
-    def _hex_to_rgb(hex_color: str) -> tuple[float, float, float]:
-        value = hex_color.lstrip("#")
-        return (
-            int(value[0:2], 16) / 255.0,
-            int(value[2:4], 16) / 255.0,
-            int(value[4:6], 16) / 255.0,
-        )
+    def _viewer_status_mod(self):
+        dat = self.ownerComp.op("mod_CydViewerStatus")
+        if dat is None:
+            return None
+        try:
+            return dat.module
+        except Exception:
+            return None
 
-    def _set_top_color(self, top, hex_color: str) -> None:
-        r, g, b = self._hex_to_rgb(hex_color)
-        if hasattr(top.par, "colorr"):
-            top.par.colorr = r
-            top.par.colorg = g
-            top.par.colorb = b
-        else:
-            top.par.fontcolorr = r
-            top.par.fontcolorg = g
-            top.par.fontcolorb = b
+    def _probe_run_status_string(self, running: bool) -> str:
+        if running:
+            return f"running (http://localhost:{VITE_PORT})"
+        return "stopped"
 
     def UpdateViewer(self, data=None) -> None:
-        comp = self.ownerComp
-        bg_top = comp.op("viewer_bg")
-        title_top = comp.op("viewer_title")
-        state_top = comp.op("viewer_state")
-        meta_top = comp.op("viewer_meta")
-        if not any((bg_top, title_top, state_top, meta_top)):
-            return
-
         if isinstance(data, dict) and "running" in data:
             running = bool(data.get("running"))
         else:
             running = self._probe_running()
+            self._set_runstatus(self._probe_run_status_string(running))
+            self._write_setup_status_flag()
 
         version = self._read_version()
 
-        if running:
-            bg_hex = "#101814"
-            state_text = "RUNNING"
-            state_hex = "#34d399"
-            meta_text = f"v{version}  ·  :3737 :5173"
-        else:
-            bg_hex = "#141416"
-            state_text = "STOPPED"
-            state_hex = "#9ca3af"
-            meta_text = f"v{version}  ·  offline"
+        mod = self._viewer_status_mod()
+        if mod is not None:
+            try:
+                mod.apply(self.ownerComp, running=running, version=version)
+            except Exception:
+                pass
 
-        muted_hex = "#9ca3af"
-
-        if bg_top is not None:
-            self._set_top_color(bg_top, bg_hex)
-        if title_top is not None:
-            title_top.par.text = "CYD EDITOR"
-            self._set_top_color(title_top, muted_hex)
-        if state_top is not None:
-            state_top.par.text = state_text
-            self._set_top_color(state_top, state_hex)
-        if meta_top is not None:
-            meta_top.par.text = meta_text
-            self._set_top_color(meta_top, muted_hex)
+        self._sync_editor_gates(stop_if_running=False)
 
     def _fetch_status_data(self) -> dict | None:
         project_dir = self._project_dir()
@@ -606,8 +644,11 @@ class CydEditorExt:
                 [sys.executable, ctl_path, "status"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=60,
                 cwd=project_dir,
+                env=self._subprocess_env(),
             )
             data = json.loads((result.stdout or "").strip())
         except (subprocess.TimeoutExpired, json.JSONDecodeError, TypeError, OSError):
@@ -679,21 +720,28 @@ class CydEditorExt:
             return stdout[:200]
         return "stopped" if cmd == "stop" else "ok"
 
-    def _run_ctl(self, cmd: str, *, project_dir: str | None = None) -> str:
+    def _run_ctl(
+        self, cmd: str, *, project_dir: str | None = None, quiet: bool = False
+    ) -> str:
+        is_setup_cmd = cmd == "setup"
         if project_dir is None:
             project_dir = self._project_dir()
             if not project_dir:
-                par = getattr(self.ownerComp.par, "Setupstatus", None)
-                return par.eval() if par is not None else "error"
+                return "error"
         else:
             ctl_check = os.path.join(project_dir, "editor_ctl.py")
             if not os.path.isfile(ctl_check):
                 msg = f"error: editor_ctl.py not found in {project_dir}"
-                self._set_setupstatus(msg)
+                if not quiet and not is_setup_cmd:
+                    self._set_runstatus(msg)
+                elif not quiet:
+                    self._write_setup_status_flag()
                 return msg
 
         ctl_path = os.path.join(project_dir, "editor_ctl.py")
-        self._set_setupstatus(f"running {cmd}...")
+        progress = self._ctl_progress_message(cmd) if not quiet else None
+        if progress:
+            self._set_runstatus(progress)
 
         timeout = 600 if cmd in ("start", "open", "flash") else SETUP_TIMEOUT if cmd == "setup" else 60
         try:
@@ -701,16 +749,29 @@ class CydEditorExt:
                 [sys.executable, ctl_path, cmd],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
                 cwd=project_dir,
+                env=self._subprocess_env(),
             )
         except subprocess.TimeoutExpired:
             msg = f"error: {cmd} timed out"
-            self._set_setupstatus(msg)
+            if not quiet:
+                if is_setup_cmd:
+                    self._setup_ready = False
+                    self._write_setup_status_flag()
+                else:
+                    self._set_runstatus(msg)
             return msg
         except OSError as exc:
             msg = f"error: {cmd} failed: {exc}"
-            self._set_setupstatus(msg)
+            if not quiet:
+                if is_setup_cmd:
+                    self._setup_ready = False
+                    self._write_setup_status_flag()
+                else:
+                    self._set_runstatus(msg)
             return msg
 
         stdout = (result.stdout or "").strip()
@@ -726,26 +787,52 @@ class CydEditorExt:
                 if cmd == "setup" and not data.get("ok", True):
                     err = data.get("error") or "setup failed"
                     error_msg = f"error: {str(err)[:200]}"
-                    self._set_setupstatus(error_msg)
-                    self._apply_status(data, update_setupstatus=False)
+                    self._setup_ready = False
+                    if not quiet:
+                        self._write_setup_status_flag()
+                    self._apply_status(data, update_runstatus=False, sync_gates=False)
                     return error_msg
+                if quiet:
+                    status = self._apply_status(
+                        data, update_runstatus=False, sync_gates=False
+                    )
+                    return status
                 status = self._apply_status(data)
                 return status
 
         status = self._format_status(cmd, result.stdout, result.stderr, result.returncode)
-        self._set_setupstatus(status)
+        if not quiet:
+            if is_setup_cmd:
+                self._write_setup_status_flag()
+            else:
+                self._set_runstatus(status)
         return status
 
     def OnRunChanged(self, on: bool):
         if self._syncing_run:
             return None
+        if on and not self._setup_is_ready():
+            run_par = getattr(self.ownerComp.par, "Run", None)
+            if run_par is not None:
+                self._syncing_run = True
+                try:
+                    run_par.val = False
+                finally:
+                    self._syncing_run = False
+            self._write_setup_status_flag()
+            self._sync_editor_gates(stop_if_running=False)
+            return None
         if on:
-            return self._run_ctl("start")
-        return self._run_ctl("stop")
+            result = self._run_ctl("start")
+        else:
+            result = self._run_ctl("stop")
+        self._sync_editor_gates(stop_if_running=False)
+        return result
 
     def Setup(self):
         """Clone repo (if needed) and ensure deps without starting servers."""
-        self._set_setupstatus("running setup...")
+        self._setup_ready = False
+        self._write_setup_status_flag()
         repo_root = ""
         cloned = False
         try:
@@ -755,9 +842,10 @@ class CydEditorExt:
                 self._retarget_projectdir(repo_root, base_dir)
         except RuntimeError as exc:
             msg = f"error: {exc}"
-            self._set_setupstatus(str(msg)[:500])
-            self._set_par_str("Setupready", "incomplete: setup")
+            self._setup_ready = False
+            self._write_setup_status_flag()
             self.UpdateViewer()
+            self._sync_editor_gates(False, stop_if_running=True)
             return msg
 
         status = self._run_ctl("setup", project_dir=repo_root)
@@ -768,57 +856,29 @@ class CydEditorExt:
                 self._ensure_deps_fallback(repo_root)
             except RuntimeError as exc:
                 msg = f"error: {exc}"
-                self._set_setupstatus(str(msg)[:500])
-                self._set_par_str("Setupready", "incomplete: setup")
+                self._setup_ready = False
+                self._write_setup_status_flag()
                 self.UpdateViewer()
+                self._sync_editor_gates(False, stop_if_running=True)
                 return msg
             status = self._run_ctl("status", project_dir=repo_root)
             data = self._last_ctl_data if isinstance(self._last_ctl_data, dict) else {}
         elif status.startswith("error") or not data.get("ok", True):
             return status
 
-        if cloned and data.get("setup_ready"):
-            self._set_setupstatus(f"setup complete ({CLONE_DIRNAME})")
+        self._write_setup_status_flag()
+        self._sync_editor_gates(stop_if_running=False)
         return status
 
-    def StartSetup(self):
-        return self.Setup()
-
-    def StopSetup(self):
-        return self._run_ctl("stop")
-
     def EditCyd(self):
+        if not self._setup_is_ready():
+            return None
+        run_par = getattr(self.ownerComp.par, "Run", None)
+        if run_par is None or not bool(run_par.eval()):
+            return None
         return self._run_ctl("open")
 
     def RefreshStatus(self):
+        if not self._setup_is_ready():
+            return None
         return self._run_ctl("status")
-
-    def FlashMicropython(self):
-        flash_par = getattr(self.ownerComp.par, "Flashmicropython", None)
-        if flash_par is not None and hasattr(flash_par, "enable") and not flash_par.enable:
-            msg = "error: no CYD serial port (connect USB)"
-            self._set_setupstatus(msg)
-            return msg
-
-        data = self._fetch_status_data()
-        if data is None:
-            status = self._run_ctl("flash")
-        else:
-            self._apply_status(data, update_setupstatus=False)
-            if not data.get("flash_ok"):
-                ports = data.get("ports") or []
-                if not ports:
-                    msg = "error: no CYD serial port (connect USB)"
-                else:
-                    shown = ", ".join(ports[:5])
-                    if len(ports) > 5:
-                        shown += ", ..."
-                    msg = f"error: ambiguous serial ports: {shown}"
-                self._set_setupstatus(msg)
-                return msg
-            status = self._run_ctl("flash")
-
-        refresh = self._fetch_status_data()
-        if refresh is not None:
-            self._apply_status(refresh, update_setupstatus=False)
-        return status
